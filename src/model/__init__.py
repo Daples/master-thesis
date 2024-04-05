@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable
 from numpy.typing import NDArray
 
 from utils._typing import DynamicMatrix, Integrator
@@ -108,15 +108,39 @@ class ODEModel(Model):
     ) -> None:
         super().__init__(initial_condition, system_cov, observation_cov)
         self.time_step: float = time_step
-        self.integrate: Integrator = get_solver(solver)
         self.states: NDArray = self.initial_condition[:, None]
+        self._integrator: Integrator = get_solver(solver)
+
+    def integrate(
+        self,
+        init_time: float,
+        end_time: float,
+        initial_condition: NDArray | None = None,
+    ) -> tuple[NDArray, NDArray]:
+        """Cast integrator to function.
+
+        Parameters
+        ----------
+        init_time: float
+            The lower time bound.
+        end_time: float
+            The upper bound.
+        initial_condition: NDArray | None, optional
+            The initial condition for the integration process. Default: None
+        """
+
+        if initial_condition is None:
+            initial_condition = self.initial_condition
+        return self._integrator(
+            self.f, initial_condition, init_time, end_time, self.time_step
+        )
 
     def forward(
         self, state: NDArray, start_time: float, end_time: float, *_: Any
     ) -> NDArray:
         """The forward operator for an ODE model."""
 
-        __, states = self.integrate(self.f, state, start_time, end_time, self.time_step)
+        __, states = self.integrate(start_time, end_time, initial_condition=state)
 
         self.current_time = end_time
         self.current_state = self.states[:, -1]
