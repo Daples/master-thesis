@@ -1,4 +1,5 @@
 from typing import Callable
+
 from numpy.typing import NDArray
 
 Integrator = Callable[

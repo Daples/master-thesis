@@ -1,12 +1,12 @@
-from numpy.typing import ArrayLike
-
-from typing import Any
-from matplotlib.figure import Figure
-from matplotlib.axes import Axes
+import os
+from typing import Any, Literal, overload
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-import os
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d.axes3d import Axes3D
+from numpy.typing import ArrayLike
 
 
 class Plotter:
@@ -123,6 +123,37 @@ class Plotter:
         ax.grid(alpha=0.4)
 
     @classmethod
+    @overload
+    def subplots(
+        cls, nrows: int, ncols: int, make_3d: Literal[True] = ...
+    ) -> tuple[Figure, Axes3D]: ...
+
+    @classmethod
+    @overload
+    def subplots(
+        cls, nrows: int, ncols: int, make_3d: Literal[False]
+    ) -> tuple[Figure, Axes]: ...
+
+    @classmethod
+    def subplots(
+        cls, nrows: int, ncols: int, make_3d: bool = False
+    ) -> tuple[Figure, Axes | Axes3D]:
+        """Get matplotlib figure and axes. Mostly for safe typing.
+
+        nrows: int
+            The number of rows of axes.
+        ncols: int
+            The number of columns of axes.
+        make_3d: bool, optional
+            If the plots will be 3D or not. Default: False
+        """
+
+        kwargs = {}
+        if make_3d:
+            kwargs |= {"subplot_kw": {"projection": "3d"}}
+        return plt.subplots(nrows=nrows, ncols=ncols, **kwargs)
+
+    @classmethod
     def save_fig(cls, path: str | None) -> None:
         """It saves the figure to the default folder if needed.
 
@@ -177,10 +208,10 @@ class Plotter:
         if clear:
             cls.__clear__()
 
-        fig, ax = plt.subplots(nrows=1, ncols=1)
-        plt.plot(x, y, *cls.args, **cls.kwargs)
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
+        fig, ax = cls.subplots(1, 1)
+        ax.plot(x, y, *cls.args, **cls.kwargs)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         cls.grid(ax)
         cls.save_fig(path)
         return fig, ax
@@ -230,10 +261,11 @@ class Plotter:
         if clear:
             cls.__clear__()
 
-        fig, ax = plt.subplots(nrows=1, ncols=1)
-        plt.plot(x, y, *cls.args, **cls.kwargs)
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
+        fig, ax = cls.subplots(1, 1, make_3d=True)
+        ax.plot(x, y, z, *cls.args, **cls.kwargs)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_zlabel(zlabel)
         cls.grid(ax)
         cls.save_fig(path)
         return fig, ax

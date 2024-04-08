@@ -1,9 +1,10 @@
-from numpy.typing import NDArray
-from model import ODEModel
 from typing import Any
-from utils._typing import DynamicMatrix
 
 import numpy as np
+from numpy.typing import NDArray
+
+from model import ODEModel
+from utils._typing import DynamicMatrix
 
 
 class Lorenz96(ODEModel):

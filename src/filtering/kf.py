@@ -1,10 +1,11 @@
-from model import LinearModel
-from numpy.typing import NDArray
 from typing import Any
-from filtering import Filter
-from utils import kalman_gain
 
 import numpy as np
+from numpy.typing import NDArray
+
+from filtering import Filter
+from model import LinearModel
+from utils import kalman_gain
 
 
 class KF(Filter):

@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable
-from numpy.typing import NDArray
-
-from utils._typing import DynamicMatrix, Integrator
-from solvers import get_solver
 
 import numpy as np
+from numpy.typing import NDArray
+
+from solvers import get_solver
+from utils._typing import DynamicMatrix, Integrator
 
 
 class Model(ABC):

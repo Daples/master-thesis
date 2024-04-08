@@ -1,7 +1,7 @@
 from typing import Callable
-from numpy.typing import NDArray
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 def discrete(

@@ -1,11 +1,12 @@
-from model import Model
-from numpy.typing import NDArray
-from typing import Any
 from abc import ABC, abstractmethod
-from numpy.random import Generator
-from utils import default_generator
+from typing import Any
 
 import numpy as np
+from numpy.random import Generator
+from numpy.typing import NDArray
+
+from model import Model
+from utils import default_generator
 
 
 class Filter(ABC):

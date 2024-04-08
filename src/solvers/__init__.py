@@ -1,8 +1,9 @@
+from enum import Enum
 from typing import Callable
+
+from .discrete import discrete
 from .euler import euler
 from .rk4 import rk4
-from .discrete import discrete
-from enum import Enum
 
 
 class Integrators(Enum):

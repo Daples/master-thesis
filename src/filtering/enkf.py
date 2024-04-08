@@ -1,8 +1,10 @@
 from numpy.typing import NDArray
-from ..model import Model
+
 from filtering import EnsembleFilter
-from utils._typing import DynamicMatrix
 from utils import kalman_gain
+from utils._typing import DynamicMatrix
+
+from ..model import Model
 
 
 class EnKF(EnsembleFilter):

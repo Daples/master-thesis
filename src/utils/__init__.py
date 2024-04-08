@@ -1,7 +1,7 @@
 # get RMSE
+from numpy.linalg import inv
 from numpy.random import default_rng
 from numpy.typing import NDArray
-from numpy.linalg import inv
 
 default_generator = default_rng(123456789)
 
