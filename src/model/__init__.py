@@ -3,8 +3,10 @@ from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import NDArray
+from numpy.random import Generator
 
 from solvers import get_solver
+from utils import default_generator
 from utils._typing import DynamicMatrix, Integrator
 
 
@@ -24,6 +26,8 @@ class Model(ABC):
         The system error covariance matrix.
     observation_cov: DynamicMatrix
         The observation process error covariance matrix.
+    generator: Generator
+        The random number generator.
     """
 
     def __init__(
@@ -31,12 +35,14 @@ class Model(ABC):
         initial_condition: NDArray,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
+        generator: Generator,
     ) -> None:
         self.current_time: float = 0
         self.initial_condition: NDArray = initial_condition
         self.current_state: NDArray = np.zeros_like(initial_condition)
         self.system_cov: DynamicMatrix = system_cov
         self.observation_cov: DynamicMatrix = observation_cov
+        self.generator: Generator = generator
 
     @abstractmethod
     def forward(
@@ -45,7 +51,7 @@ class Model(ABC):
         start_time: float,
         end_time: float,
         *params: Any,
-        stochastic: bool = False
+        stochastic: bool = False,
     ) -> NDArray:
         """It runs the numerical model forward from `start_time` to `end_time` using the
         input `state`.
@@ -70,7 +76,7 @@ class Model(ABC):
         """
 
     @abstractmethod
-    def observe(self, state: NDArray) -> NDArray:
+    def _observe(self, state: NDArray) -> NDArray:
         """It extracts the observed state from the state.
 
         Parameters
@@ -84,8 +90,32 @@ class Model(ABC):
             The observed output.
         """
 
+    def observe(self, state: NDArray, add_noise: bool = False) -> NDArray:
+        """It extracts the observed state from the state.
 
-class ODEModel(Model):
+        Parameters
+        ----------
+        state: NDArray
+            The state to observe at `current_time`.
+        add_noise: bool, optional
+            If noise should be added to the observations.
+
+        Returns
+        -------
+        NDArray
+            The observed output.
+        """
+
+        observation = self._observe(state).squeeze()
+        if add_noise:
+            observation = observation.copy() + self.generator.multivariate_normal(
+                np.zeros_like(observation),
+                self.observation_cov(self.current_time),
+            )
+        return observation
+
+
+class ODEModel(Model, ABC):
     """A class to represent an explicit ODE model. Mostly to include the solver logic.
 
     Attributes
@@ -104,12 +134,28 @@ class ODEModel(Model):
         time_step: float,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
+        generator: Generator,
         solver: str = "rk4",
     ) -> None:
-        super().__init__(initial_condition, system_cov, observation_cov)
+        super().__init__(initial_condition, system_cov, observation_cov, generator)
         self.time_step: float = time_step
-        self.states: NDArray = self.initial_condition[:, None]
+        self.times: NDArray = np.zeros(0)
+        self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
         self._integrator: Integrator = get_solver(solver)
+        self.simulated_times: NDArray | None = None
+
+    def reset_model(self) -> None:
+        """It cleas the array of computes states and adds the new initial condiion.
+
+        Parameters
+        ----------
+        initial_condition: NDArray | None, optional
+            The initial condition to initialize the states array. Default: None
+        """
+
+        self.current_time = 0
+        self.current_state = np.zeros_like(self.initial_condition)
+        self.states = np.zeros((self.initial_condition.shape[0], 0))
 
     def integrate(
         self,
@@ -127,6 +173,13 @@ class ODEModel(Model):
             The upper bound.
         initial_condition: NDArray | None, optional
             The initial condition for the integration process. Default: None
+
+        Returns
+        -------
+        NDArray
+            The array of simulation time steps.
+        NDArray
+            The array of simulated states for all time steps.
         """
 
         if initial_condition is None:
@@ -140,11 +193,13 @@ class ODEModel(Model):
     ) -> NDArray:
         """The forward operator for an ODE model."""
 
-        __, states = self.integrate(start_time, end_time, initial_condition=state)
+        times, states = self.integrate(start_time, end_time, initial_condition=state)
 
+        self.states = np.hstack((self.states, states))
+        self.times = np.hstack((self.times, times))
         self.current_time = end_time
         self.current_state = self.states[:, -1]
-        self.states = np.hstack((self.states, states))
+
         return self.current_state
 
     @abstractmethod
@@ -184,10 +239,18 @@ class LinearModel(ODEModel):
         H: DynamicMatrix,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
+        generator: Generator | None,
         solver: str = "rk4",
     ) -> None:
+        if generator is None:
+            generator = default_generator
         super().__init__(
-            initial_condition, time_step, system_cov, observation_cov, solver=solver
+            initial_condition,
+            time_step,
+            system_cov,
+            observation_cov,
+            generator,
+            solver=solver,
         )
         self.M: DynamicMatrix = M
         self.H: DynamicMatrix = H
@@ -195,9 +258,9 @@ class LinearModel(ODEModel):
     def f(self, time: float, state: NDArray) -> NDArray:
         """A linear propagation of the state."""
 
-        return self.M(time) @ state
+        return self.M(time) @ state[:, np.newaxis]
 
-    def observe(self, state: NDArray) -> NDArray:
+    def _observe(self, state: NDArray) -> NDArray:
         """Observation model for a linear system."""
 
-        return self.H(self.current_time) @ state
+        return self.H(self.current_time) @ state[:, np.newaxis]
