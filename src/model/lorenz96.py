@@ -1,7 +1,6 @@
-from typing import Any
-
 import numpy as np
 from numpy.typing import NDArray
+from numpy.random import Generator
 
 from model import ODEModel
 from utils._typing import DynamicMatrix
@@ -24,10 +23,16 @@ class Lorenz96(ODEModel):
         forcing: float,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
+        generator: Generator,
         solver: str = "rk4",
     ) -> None:
         super().__init__(
-            initial_condition, time_step, system_cov, observation_cov, solver=solver
+            initial_condition,
+            time_step,
+            system_cov,
+            observation_cov,
+            generator,
+            solver=solver,
         )
         self.n_states: int = n_states
         self.forcing: float = forcing
@@ -42,7 +47,7 @@ class Lorenz96(ODEModel):
             vec[i] = (x[(i + 1) % n_states] - x[i - 2]) * x[i - 1] - x[i] + self.forcing
         return vec
 
-    def observe(self, state: NDArray) -> NDArray:
+    def _observe(self, state: NDArray) -> NDArray:
         """All states are observable."""
 
         return state
