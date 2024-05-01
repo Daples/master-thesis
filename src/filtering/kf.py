@@ -9,13 +9,7 @@ from utils import kalman_gain
 
 
 class KF(Filter):
-    """A class that represents a Kalman filter.
-
-    Attributes
-    ----------
-    R: DynamicMatrix
-        The observation noise covariance matrix.
-    """
+    """A class that represents a Kalman filter."""
 
     model: LinearModel
 
@@ -33,9 +27,13 @@ class KF(Filter):
         """Kalman gain."""
 
         t = self.current_time
-        return kalman_gain(
-            self.forecast_cov, self.model.H(t), self.model.observation_cov(t)
-        )
+        if self.correct:
+            K = kalman_gain(
+                self.forecast_cov, self.model.H(t), self.model.observation_cov(t)
+            )
+        else:
+            K = np.zeros((self.n_states, self.n_outputs))
+        return K
 
     def analysis(self, observation: NDArray) -> None:
         """Linear analysis equation (Kalman analysis)."""
