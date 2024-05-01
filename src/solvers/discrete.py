@@ -40,6 +40,6 @@ def discrete(
 
     states[:, 0] = init_state
     for i, t in enumerate(time_vector[:-1]):
-        states[:, i + 1] = f(t, states[:, i])
+        states[:, i + 1] = f(t, states[:, i]).squeeze()
 
     return time_vector, states

@@ -42,10 +42,10 @@ def rk4(
     states[:, 0] = init_state
     h = time_step
     for i, t in enumerate(time_vector[:-1]):
-        k1 = h * f(t, states[:, i])
-        k2 = h * f(t + h / 2, states[:, i] + k1 / 2)
-        k3 = h * f(t + h / 2, states[:, i] + k2 / 2)
-        k4 = h * f(t + h, states[:, i] + k3)
+        k1 = h * f(t, states[:, i]).squeeze()
+        k2 = h * f(t + h / 2, states[:, i] + k1 / 2).squeeze()
+        k3 = h * f(t + h / 2, states[:, i] + k2 / 2).squeeze()
+        k4 = h * f(t + h, states[:, i] + k3).squeeze()
         states[:, i + 1] = states[:, i] + (k1 + 2 * k2 + 2 * k3 + k4) / 6
 
     return time_vector, states
