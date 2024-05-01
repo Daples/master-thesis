@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+import copy
 import numpy as np
 from numpy.random import Generator
 from numpy.typing import NDArray
+from tqdm import tqdm
 
 from model import Model
 from utils import default_generator
@@ -32,6 +34,12 @@ class Filter(ABC):
         The forecast state covariance matrix.
     generator: Generator
         The random number generator.
+    correct: bool
+        If assimilation should be performed. This set the gain to 0 for the analysis.
+    n_states: int
+        The number of states.
+    n_outputs: int
+        The number of outputs.
     """
 
     def __init__(
@@ -54,6 +62,9 @@ class Filter(ABC):
         self.analysis_cov: NDArray = self.init_cov
         self.forecast_state: NDArray = np.zeros_like(self.init_state)
         self.forecast_cov: NDArray = np.zeros_like(self.init_cov)
+        self.correct: bool = True
+        self.n_states: int = len(self.init_state)
+        self.n_outputs: int = len(self.model.observe(self.init_state))
 
     def forecast(self, end_time: float, *params: Any) -> None:
         """Forecast step of the filter. Runs the forward model from the current model
@@ -94,8 +105,11 @@ class Filter(ABC):
         """
 
     def filter(
-        self, times: list[float], observations: list[NDArray]
-    ) -> tuple[list[NDArray], list[NDArray]]:
+        self,
+        times: list[float],
+        observations: NDArray,
+        cut_off_time: float | None = None,
+    ) -> tuple[NDArray, NDArray]:
         """Apply the filter to a set of observations.
 
         Parameters
@@ -103,27 +117,37 @@ class Filter(ABC):
         times: list[float]
             The list of assimilation times.
         observations: NDArray
-            The list of observations to assimilate.
+            The observations to assimilate. Shape: `(n_output, analysis_times)`
 
         Returns
         -------
-        list[NDArray]
-            The list of corrected (analysis) states.
-        list[NDArray]
-            The list of estimated (analysis) covariance matrices.
+        NDArray
+            The corrected (analysis) states. Shape: `(n_states, analysis_times)`
+        NDArray
+            The estimated (analysis) covariance matrices.
+            Shape: `(n_states, n_states, analysis_times)`
         """
 
-        if len(times) != len(observations):
+        if cut_off_time is None:
+            cut_off_time = times[-1]
+
+        _, analysis_times = observations.shape
+        if len(times) != analysis_times:
             raise IndexError("Observation times and values have different length.")
 
-        estimated_states = []
-        estimated_covs = []
-        for k, _ in enumerate(times):
-            self.forecast(times[k])
-            self.analysis(observations[k])
+        estimated_states = np.zeros((self.n_states, len(times)))
+        estimated_covs = np.zeros((*self.init_cov.shape, len(times)))
+        for k, t in enumerate(tqdm(times)):
+            if t > cut_off_time:
+                self.correct = False
 
-            estimated_states.append(self.analysis_state)
-            estimated_covs.append(self.analysis_cov)
+            self.forecast(times[k])
+            self.analysis(observations[:, k])
+
+            estimated_states[:, k] = self.analysis_state
+            estimated_covs[:, :, k] = self.analysis_cov
+
+        self.correct = True
         return estimated_states, estimated_covs
 
 
@@ -134,20 +158,52 @@ class EnsembleFilter(Filter):
     ----------
     ensemble_size: int
         The number of ensemble members.
+    ensembles: list[Model]
+        The list of independent copies of the reference model.
     ensembles_forecast: NDArray
         The matrix of ensemble states.
+
+    Properties
+    ----------
+    forecast_ensemble: bool
+        If the ensemble should be propagated (i.e. with noise).
     """
 
     def __init__(
-        self, model: Model, init_state: NDArray, init_cov: NDArray, ensemble_size: int
+        self,
+        model: Model,
+        init_state: NDArray,
+        init_cov: NDArray,
+        ensemble_size: int,
+        generator: Generator | None,
     ) -> None:
-        super().__init__(model, init_state, init_cov)
+        super().__init__(model, init_state, init_cov, generator=generator)
 
-        self.ensemble_size = ensemble_size
+        self.ensemble_size: int = ensemble_size
+        self.ensembles: list[Model] = []
         self.ensemble_analysis: NDArray = self.generator.multivariate_normal(
             self.init_state, self.init_cov, self.ensemble_size
         ).T
         self.ensemble_forecast: NDArray = np.zeros_like(self.ensemble_analysis)
+        self.__init_ensembles__()
+
+    @property
+    def forecast_ensembles(self) -> bool:
+        """If the ensembles should be propagated with nosie.
+
+        Returns
+        -------
+        bool
+            The logic value.
+        """
+
+        return self.correct
+
+    def __init_ensembles__(self) -> None:
+        """Initialize each ensemble as an independent model instance."""
+
+        for _ in range(self.ensemble_size):
+            self.ensembles.append(copy.deepcopy(self.model))
 
     def forecast(self, end_time: float, *params: Any) -> None:
         """Forecast all ensembles and compute the forecast state statistics.
@@ -155,15 +211,23 @@ class EnsembleFilter(Filter):
         memory in general.
         """
 
-        for i in range(self.ensemble_size):
-            new_state = self.model.forward(
-                self.ensemble_analysis[:, i], self.current_time, end_time, *params
-            )
-            # TODO: end_time or current_time
-            noise = self.generator.multivariate_normal(
-                np.zeros_like(self.init_state), self.model.system_cov(end_time)
-            )
-            self.ensemble_forecast[:, i] = new_state + noise
+        # Propagate reference model (proxi to estimated state)
+        self.model.forward(self.analysis_state, self.current_time, end_time, *params)
+
+        # Propagate each ensemble
+        noises = self.generator.multivariate_normal(
+            np.zeros_like(self.init_state),
+            self.model.system_cov(end_time),
+            self.ensemble_size,
+        )
+        for i, ensemble_model in enumerate(self.ensembles):
+            new_state = self.model.current_state
+            if self.forecast_ensembles:
+                new_state = ensemble_model.forward(
+                    self.ensemble_analysis[:, i], self.current_time, end_time, *params
+                )
+                new_state += noises[i, :]
+            self.ensemble_forecast[:, i] = new_state
 
         self.forecast_state = self.ensemble_forecast.mean(axis=1)
         self.forecast_cov = np.cov(self.ensemble_forecast, ddof=1)
@@ -172,14 +236,10 @@ class EnsembleFilter(Filter):
     def analysis(self, observation: NDArray) -> None:
         """Perform the analysis for all ensembles."""
 
-        for i in range(self.ensemble_size):
+        for i, ensemble_model in enumerate(self.ensembles):
             state = self.ensemble_forecast[:, i]
-            observation_noise = self.generator.multivariate_normal(
-                np.zeros_like(observation),
-                self.model.observation_cov(self.current_time),
-            )
-            model_output = self.model.observe(state)
-            innovation = observation - model_output - observation_noise
+            model_output = ensemble_model.observe(state, add_noise=True)
+            innovation = observation - model_output
             K = self.compute_gain()
 
             self.ensemble_analysis[:, i] = state + K @ innovation
