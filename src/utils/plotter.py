@@ -1,12 +1,42 @@
 import os
-from typing import Any, Literal, overload
+from typing import Any, Callable, Literal, overload
 
+import functools
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 from numpy.typing import ArrayLike
+
+
+def setup_save(func) -> Callable:
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        # Clear the figure if needed
+        if kwargs.get("clear", True):
+            plt.cla()
+            plt.clf()
+            plt.close("all")
+
+        # Setup matplotlib
+        plt.rc("text", usetex=True)
+        plt.rcParams.update({"font.size": Plotter.font_size})
+
+        # Plotting function
+        response = func(*args, **kwargs)
+
+        # Save fig
+        folder = Plotter._folder
+        path = kwargs.get("path", None)
+        if path is not None:
+            if not os.path.exists(folder):
+                os.mkdir(folder)
+            path = os.path.join(folder, path)
+            plt.savefig(path, bbox_inches="tight")
+        return response
+
+    return wrapped
 
 
 class Plotter:
@@ -20,6 +50,7 @@ class Plotter:
         The additional arguments for all plots.
     kwargs: dict[str, Any]
         The keyword arguments for all plots.
+    TODO: finish list
     """
 
     _folder: str = os.path.join(os.getcwd(), "figs")
@@ -36,24 +67,9 @@ class Plotter:
     c_label: str = "$c\ (\mathrm{m/s}))$"
     t_label: str = "Time"
 
-    @staticmethod
-    def __clear__() -> None:
-        """It clears the graphic objects."""
-
-        plt.cla()
-        plt.clf()
-        plt.close("all")
-
-    @classmethod
-    def __setup_config__(cls) -> None:
-        """It sets up the matplotlib configuration."""
-
-        plt.rc("text", usetex=True)
-        plt.rcParams.update({"font.size": cls.font_size})
-
     @classmethod
     def legend(cls, ax: Axes) -> None:
-        """It moved the legend outside the plot.
+        """It moves the legend outside the plot.
 
         Parameters
         ----------
@@ -88,12 +104,6 @@ class Plotter:
 
         # # Put a legend to the right of the current axis
         # ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
-
-    @staticmethod
-    def show() -> None:
-        """Display the figure."""
-
-        plt.show()
 
     @classmethod
     def date_axis(cls, ax: Axes) -> None:
@@ -140,12 +150,21 @@ class Plotter:
     ) -> tuple[Figure, Axes | Axes3D]:
         """Get matplotlib figure and axes. Mostly for safe typing.
 
+        Parameters
+        ----------
         nrows: int
             The number of rows of axes.
         ncols: int
             The number of columns of axes.
         make_3d: bool, optional
             If the plots will be 3D or not. Default: False
+
+        Returns
+        -------
+        Figure
+            The figure handle.
+        Axes | Axes3D
+            The axes handle, depending on the projection as well.
         """
 
         kwargs = {}
@@ -154,31 +173,10 @@ class Plotter:
         return plt.subplots(nrows=nrows, ncols=ncols, **kwargs)
 
     @classmethod
-    def save_fig(cls, path: str | None) -> None:
-        """It saves the figure to the default folder if needed.
-
-        Parameters
-        ----------
-        path: str | None, optional
-            The path to save the figure to, if needed. Default: None
-        """
-
-        if path is not None:
-            if not os.path.exists(cls._folder):
-                os.mkdir(cls._folder)
-            path = os.path.join(cls._folder, path)
-            plt.savefig(path, bbox_inches="tight")
-
-    @classmethod
+    @setup_save
     def plot(
-        cls,
-        x: ArrayLike,
-        y: ArrayLike,
-        path: str | None = None,
-        xlabel: str = "$x$",
-        ylabel: str = "$y$",
-        clear: bool = True,
-    ) -> tuple[Figure, Axes]:
+        cls, x: ArrayLike, y: ArrayLike, xlabel: str = "$x$", ylabel: str = "$y$", **_
+    ) -> Axes:
         """It creates a plot with standard formatting.
 
         Parameters
@@ -198,36 +196,29 @@ class Plotter:
 
         Returns
         -------
-        matplotlib.figure.Figure
-            The figure handle.
         matplotlib.figure.Axes
             The axes handle.
         """
 
-        cls.__setup_config__()
-        if clear:
-            cls.__clear__()
-
-        fig, ax = cls.subplots(1, 1)
+        _, ax = cls.subplots(1, 1)
         ax.plot(x, y, *cls.args, **cls.kwargs)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         cls.grid(ax)
-        cls.save_fig(path)
-        return fig, ax
+        return ax
 
     @classmethod
+    @setup_save
     def plot3(
         cls,
         x: ArrayLike,
         y: ArrayLike,
         z: ArrayLike,
-        path: str | None = None,
         xlabel: str = "$x$",
         ylabel: str = "$y$",
         zlabel: str = "$z$",
-        clear: bool = True,
-    ) -> tuple[Figure, Axes]:
+        **_
+    ) -> Axes:
         """It creates a plot with standard formatting.
 
         Parameters
@@ -251,21 +242,14 @@ class Plotter:
 
         Returns
         -------
-        matplotlib.figure.Figure
-            The figure handle.
         matplotlib.figure.Axes
             The axes handle.
         """
 
-        cls.__setup_config__()
-        if clear:
-            cls.__clear__()
-
-        fig, ax = cls.subplots(1, 1, make_3d=True)
+        _, ax = cls.subplots(1, 1, make_3d=True)
         ax.plot(x, y, z, *cls.args, **cls.kwargs)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.set_zlabel(zlabel)
         cls.grid(ax)
-        cls.save_fig(path)
-        return fig, ax
+        return ax
