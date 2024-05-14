@@ -1,8 +1,12 @@
-from filtering import Filter
 from model import Model
+from utils.plotter import Plotter
 
 from dataclasses import dataclass
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from scipy.ndimage import uniform_filter1d
+from typing import Any
+
 
 import numpy as np
 
@@ -28,6 +32,10 @@ class FilteringResults:
 
     Properties
     ----------
+    true_times: NDArray
+        Time instants of true data.
+    true_states: NDArray
+        The true states (if available).
     innovations: NDArray
         The array of innovations (observation - forecast)
     rmses: NDArray
@@ -40,9 +48,74 @@ class FilteringResults:
     estimated_states: NDArray
     estimated_covs: NDArray
     simulation_times: NDArray
-    _estimated_observations: NDArray
+    run_id: str | None = None
+    _estimated_observations: NDArray | None = None
+    _true_times: NDArray | None = None
+    _true_states: NDArray | None = None
     _innovations: NDArray | None = None
     _rmses: NDArray | None = None
+
+    @property
+    def true_times(self) -> NDArray:
+        """It stores the true times if available.
+
+        Returns
+        -------
+        NDArray
+            The matrix of true times through time.
+
+        Raises
+        ------
+        ValueError
+            When no ground truth is available.
+        """
+
+        if self._true_times is None:
+            raise ValueError("No true times available.")
+        return self._true_times
+
+    @true_times.setter
+    def true_times(self, array: NDArray) -> None:
+        """Set the true times if available.
+
+        Parameters
+        ----------
+        array: NDArray
+            The array of true times.
+        """
+
+        self._true_times = array
+
+    @property
+    def true_states(self) -> NDArray:
+        """It stores the true states if available.
+
+        Returns
+        -------
+        NDArray
+            The matrix of true states through time.
+
+        Raises
+        ------
+        ValueError
+            When no ground truth is available.
+        """
+
+        if self._true_states is None:
+            raise ValueError("No true states available.")
+        return self._true_states
+
+    @true_states.setter
+    def true_states(self, array: NDArray) -> None:
+        """Set the true states if available.
+
+        Parameters
+        ----------
+        array: NDArray
+            The array of true states.
+        """
+
+        self._true_states = array
 
     @property
     def innovations(self) -> NDArray:
@@ -102,3 +175,145 @@ class FilteringResults:
         """
 
         return self.rmses[:, -1]
+
+    def get_label(self, label: str) -> str:
+        """It returns the label with the run ID.
+
+        Parameters
+        ----------
+        label: str
+            The line label.
+
+        Returns
+        -------
+        str
+            The line label with added run ID.
+        """
+
+        if self.run_id is not None:
+            label += f" ({self.run_id})"
+        return label
+
+    def plot_innovations(
+        self,
+        state_idx: int,
+        window: int | None = None,
+        path: str | None = None,
+        **kwargs: Any,
+    ) -> Axes:
+        """Show the innovation process after assimilation.
+
+        Parameters
+        ----------
+        state_idx: int
+            The state index to present the results from.
+        window: int | None, optional
+            The moving average window if required. Default: None
+        path: str | None, optional
+            The filename to output the figure. Default: None
+        **kwargs: Any
+            Extra keyword arguments for the plotting function.
+
+        Returns
+        -------
+        Axes
+            The axis handle.
+        """
+
+        kwargs |= {"figsize": "horizontal"}
+        ax = kwargs.pop("ax", None)
+
+        innovations = self.innovations[state_idx, :]
+        if window is not None:
+            averaged = uniform_filter1d(innovations, size=window)
+            ax = Plotter.plot(
+                self.assimilation_times,
+                averaged,
+                "r",
+                label=self.get_label(f"Averaged w={window}"),
+                ax=ax,
+                **kwargs,
+            )
+
+        ax = Plotter.plot(
+            self.assimilation_times,
+            innovations,
+            "k",
+            alpha=0.7,
+            zorder=-1,
+            xlabel="$t$",
+            ylabel="",
+            label=self.get_label("Innovations"),
+            path=path,
+            ax=ax,
+            **kwargs,
+        )
+        return ax
+
+    def plot_filtering(
+        self,
+        state_idx: int,
+        path: str | None = None,
+        n_run: int | None = None,
+        **kwargs: Any,
+    ) -> Axes:
+        """It shows the result from the filtering.
+        TODO: This function works assuming H = I in Lorenz96. Fix?
+
+        Parameters
+        ----------
+        state_idx: int
+            The state index to present the results from.
+        path: str | None, optional
+            The filename to output the figure. Default: None
+        **kwargs: Any
+            Extra keyword arguments for the plotting function.
+
+        Returns
+        -------
+        Axes
+            The axis handle.
+        """
+
+        kwargs |= {"figsize": "horizontal"}
+        ax = kwargs.pop("ax", None)
+
+        ax = Plotter.plot(
+            self.simulation_times,
+            self.model.states[state_idx, :],
+            "k",
+            label="Assimilation",
+            alpha=0.2,
+            ax=ax,
+            clear=True,
+            **kwargs,
+        )
+        if self.true_times is not None and self.true_states is not None:
+            ax = Plotter.plot(
+                self.true_times,
+                self.true_states[state_idx, :],
+                "b",
+                label="Truth",
+                ax=ax,
+                **kwargs,
+            )
+        Plotter.plot(
+            self.assimilation_times,
+            self.observations[state_idx, :],
+            "kx",
+            label="Observations",
+            ax=ax,
+            **kwargs,
+        )
+        Plotter.plot(
+            self.assimilation_times,
+            self.estimated_states[state_idx, :],
+            "r*",
+            label="Estimates",
+            ylabel=f"$x_{{{state_idx}}}$",
+            xlabel="$t$",
+            path=path,
+            ax=ax,
+            **kwargs,
+        )
+        return ax

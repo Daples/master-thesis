@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from tqdm import tqdm
 
 from model import Model
+from utils.results import FilteringResults
 from utils import default_generator
 
 
@@ -106,26 +107,28 @@ class Filter(ABC):
 
     def filter(
         self,
-        times: list[float],
+        times: NDArray,
         observations: NDArray,
         cut_off_time: float | None = None,
-    ) -> tuple[NDArray, NDArray]:
+        run_id: str | None = None,
+    ) -> FilteringResults:
         """Apply the filter to a set of observations.
 
         Parameters
         ----------
-        times: list[float]
-            The list of assimilation times.
+        times: NDArray
+            The array of assimilation times.
         observations: NDArray
             The observations to assimilate. Shape: `(n_output, analysis_times)`
+        cut_off_time: float | None, optional
+            A time to stop the assimilation (emulates forecasting). Default: None
+        run_id: str | None, optional
+            An ID for the filtering run/experiment performed. Default: None
 
         Returns
         -------
-        NDArray
-            The corrected (analysis) states. Shape: `(n_states, analysis_times)`
-        NDArray
-            The estimated (analysis) covariance matrices.
-            Shape: `(n_states, n_states, analysis_times)`
+        FilteringResults
+            The filtering results object.
         """
 
         if cut_off_time is None:
@@ -135,8 +138,8 @@ class Filter(ABC):
         if len(times) != analysis_times:
             raise IndexError("Observation times and values have different length.")
 
-        estimated_states = np.zeros((self.n_states, len(times)))
-        estimated_covs = np.zeros((*self.init_cov.shape, len(times)))
+        estimated_states = np.zeros((self.n_states, analysis_times))
+        estimated_covs = np.zeros((*self.init_cov.shape, analysis_times))
         for k, t in enumerate(tqdm(times)):
             if t > cut_off_time:
                 self.correct = False
@@ -148,7 +151,16 @@ class Filter(ABC):
             estimated_covs[:, :, k] = self.analysis_cov
 
         self.correct = True
-        return estimated_states, estimated_covs
+
+        return FilteringResults(
+            copy.deepcopy(self.model),
+            times,
+            observations,
+            estimated_states,
+            estimated_covs,
+            self.model.times,
+            run_id=run_id,
+        )
 
 
 class EnsembleFilter(Filter):
