@@ -1,5 +1,6 @@
 import os
-from typing import Any, Callable, Literal, overload
+from typing import Any, Callable, Literal, overload, cast
+from utils._typing import P, T
 
 import functools
 import matplotlib.dates as mdates
@@ -10,11 +11,25 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from numpy.typing import ArrayLike
 
 
-def setup_save(func) -> Callable:
+def setup_save(func: Callable[P, T]) -> Callable[P, T]:
+    """Decorator for common functionality around plots. It sets up matplotlib with class
+    parameters, saves the figure in the specified location and displays it if needed.
+
+    Parameters
+    ----------
+    func: (P, T) -> (P, T)
+        The plotting function to wrap.
+
+    Returns
+    -------
+    (P, T) -> (P, T)
+        The plotting function with added functionality.
+    """
+
     @functools.wraps(func)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
         # Clear the figure if needed
-        if kwargs.get("clear", True):
+        if kwargs.pop("clear", False):
             plt.cla()
             plt.clf()
             plt.close("all")
@@ -24,11 +39,11 @@ def setup_save(func) -> Callable:
         plt.rcParams.update({"font.size": Plotter.font_size})
 
         # Plotting function
+        path = cast(str | None, kwargs.pop("path", None))
         response = func(*args, **kwargs)
 
         # Save fig
         folder = Plotter._folder
-        path = kwargs.get("path", None)
         if path is not None:
             if not os.path.exists(folder):
                 os.mkdir(folder)
@@ -54,8 +69,9 @@ class Plotter:
     """
 
     _folder: str = os.path.join(os.getcwd(), "figs")
-    args: list[Any] = ["k-"]
+    args: tuple[Any] = ("k-",)
     kwargs: dict[str, Any] = {"markersize": 3}
+    standard: str = "standard"
     figsize_standard: tuple[int, int] = (8, 5)
     figsize_horizontal: tuple[int, int] = (16, 5)
     figsize_vertical: tuple[int, int] = (8, 10)
@@ -66,6 +82,33 @@ class Plotter:
     x_label: str = "$x\ (\mathrm{km})$"
     c_label: str = "$c\ (\mathrm{m/s}))$"
     t_label: str = "Time"
+
+    @classmethod
+    def check_args(
+        cls, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Get default class arguments if needed.
+
+        Parameters
+        ----------
+        args: tuple[Any, ...]
+            The input positional arguments.
+        kwargs: dict[str, Any]
+            The input keyword arguments.
+
+        Returns
+        -------
+        tuple[Any, ...]
+            The output positional arguments.
+        dict[str, Any]
+            The output keyword arguments.
+        """
+
+        if not args:
+            args = cls.args
+        if not kwargs:
+            kwargs = cls.kwargs
+        return args, kwargs
 
     @classmethod
     def legend(cls, ax: Axes) -> None:
@@ -80,7 +123,7 @@ class Plotter:
         ax.legend(
             bbox_to_anchor=(0, 1.02, 1, 0.2),
             loc="lower right",
-            ncol=3,
+            ncol=5,
         )
 
         # Bottom outside (may overlap)
@@ -135,18 +178,18 @@ class Plotter:
     @classmethod
     @overload
     def subplots(
-        cls, nrows: int, ncols: int, make_3d: Literal[True] = ...
+        cls, nrows: int, ncols: int, figsize: str, make_3d: Literal[True] = ...
     ) -> tuple[Figure, Axes3D]: ...
 
     @classmethod
     @overload
     def subplots(
-        cls, nrows: int, ncols: int, make_3d: Literal[False]
+        cls, nrows: int, ncols: int, figsize: str, make_3d: Literal[False]
     ) -> tuple[Figure, Axes]: ...
 
     @classmethod
     def subplots(
-        cls, nrows: int, ncols: int, make_3d: bool = False
+        cls, nrows: int, ncols: int, figsize: str, make_3d: bool = False
     ) -> tuple[Figure, Axes | Axes3D]:
         """Get matplotlib figure and axes. Mostly for safe typing.
 
@@ -156,6 +199,8 @@ class Plotter:
             The number of rows of axes.
         ncols: int
             The number of columns of axes.
+        figsize: str
+            The figure size to use.
         make_3d: bool, optional
             If the plots will be 3D or not. Default: False
 
@@ -167,7 +212,9 @@ class Plotter:
             The axes handle, depending on the projection as well.
         """
 
-        kwargs = {}
+        aux = "figsize"
+        size = getattr(cls, aux + "_" + figsize)
+        kwargs = {aux: size}
         if make_3d:
             kwargs |= {"subplot_kw": {"projection": "3d"}}
         return plt.subplots(nrows=nrows, ncols=ncols, **kwargs)
@@ -175,7 +222,15 @@ class Plotter:
     @classmethod
     @setup_save
     def plot(
-        cls, x: ArrayLike, y: ArrayLike, xlabel: str = "$x$", ylabel: str = "$y$", **_
+        cls,
+        x: ArrayLike,
+        y: ArrayLike,
+        *args: Any,
+        xlabel: str = "$x$",
+        ylabel: str = "$y$",
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        **kwargs: Any,
     ) -> Axes:
         """It creates a plot with standard formatting.
 
@@ -185,6 +240,62 @@ class Plotter:
             The data on horizontal axis.
         y: utils._typing.DataArray
             The data on vertical axis.
+        *args: Any
+            Any additional arguments for the plot.
+        xlabel: str, optional
+            The label of the horizontal axis. Default: "$x$"
+        ylabel: str, optional
+            The label of the vertical axis. Default: "$y$"
+        ax: Axes, optional
+            The axis to plot on. Default: None
+        figsize: str | None, optional
+            The figure size. Default: None
+        **kwargs: Any
+            The additional keyword arguments for the plot.
+
+        Returns
+        -------
+        matplotlib.figure.Axes
+            The axes handle.
+        """
+
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        args, kwargs = cls.check_args(args, kwargs)
+        ax.plot(x, y, *args, **kwargs)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        cls.grid(ax)
+        if "label" in kwargs:
+            cls.legend(ax)
+        return ax
+
+    @classmethod
+    @setup_save
+    def mplot(
+        cls,
+        x,
+        ys,
+        labels: list[str] | None = None,
+        path: str | None = None,
+        xlabel: str = "$x$",
+        ylabel: str = "$y$",
+        clear: bool = True,
+        is_ax_date: bool = False,
+        linewidth: float = 1,
+    ) -> tuple[Figure, Axes]:
+        """It plots several lines with standard formatting.
+
+        Parameters
+        ----------
+        x
+            The data on horizontal axis.
+        ys
+            The data sets on vertical axis. Shape: (data, samples)
+        labels: list[str] | None
+            The labels for each data sample (legend). Default: None
         path: str | None, optional
             The name to save the figure with. Default: None
         xlabel: str, optional
@@ -193,17 +304,30 @@ class Plotter:
             The label of the vertical axis. Default: "$y$"
         clear: bool
             Whether to clear the figure or not. Default: True
+        is_ax_date: bool
+            Whether the horizontal axis should be date formatted. Default: False
+        linewidth: float
+            The line width for the plots. Default: 1
 
         Returns
         -------
+        matplotlib.figure.Figure
+            The figure handle.
         matplotlib.figure.Axes
             The axes handle.
         """
 
-        _, ax = cls.subplots(1, 1)
-        ax.plot(x, y, *cls.args, **cls.kwargs)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=cls.figsize_standard)
+        kwargs = {"linewidth": linewidth}
+        if labels is not None:
+            kwargs = {"label": labels}
+
+        for i in range(ys.shape[1]):
+            ax.plot(x, ys[:, i], **kwargs)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
+        if is_ax_date:
+            cls.date_axis(ax)
         cls.grid(ax)
         return ax
 
@@ -214,11 +338,14 @@ class Plotter:
         x: ArrayLike,
         y: ArrayLike,
         z: ArrayLike,
+        *args: Any,
         xlabel: str = "$x$",
         ylabel: str = "$y$",
         zlabel: str = "$z$",
-        **_
-    ) -> Axes:
+        ax: Axes3D | None = None,
+        figsize: str | None = None,
+        **kwargs: Any,
+    ) -> Axes3D:
         """It creates a plot with standard formatting.
 
         Parameters
@@ -229,16 +356,20 @@ class Plotter:
             The data on second axis.
         z: ArrayLike
             The data on the third axis.
-        path: str | None, optional
-            The name to save the figure with. Default: None
+        *args: Any
+            Any additional arguments for the plot.
         xlabel: str, optional
             The label of the horizontal axis. Default: "$x$"
         ylabel: str, optional
             The label of the vertical axis. Default: "$y$"
         zlabel: str, optional
             The label on the third axis. Default: "$z$"
-        clear: bool
-            Whether to clear the figure or not. Default: True
+        ax: Axes, optional
+            The axis to plot on. Default: None
+        figsize: str | None, optional
+            The figure size. Default: None
+        **kwargs: Any
+            The additional keyword arguments for the plot.
 
         Returns
         -------
@@ -246,8 +377,12 @@ class Plotter:
             The axes handle.
         """
 
-        _, ax = cls.subplots(1, 1, make_3d=True)
-        ax.plot(x, y, z, *cls.args, **cls.kwargs)
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, make_3d=True, figsize=figsize)
+        args, kwargs = cls.check_args(args, kwargs)
+        ax.plot(x, y, z, *args, **kwargs)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.set_zlabel(zlabel)
