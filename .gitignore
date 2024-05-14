@@ -454,5 +454,6 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-#
+# Other
 .vscode/
+*.pdf
