@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 from numpy.random import Generator
 
+from model.parameter import Parameter
 from solvers import get_solver
 from utils import default_generator
 from utils._typing import DynamicMatrix, Integrator
@@ -15,6 +16,8 @@ class Model(ABC):
 
     Attributes
     ----------
+    parameters: list[Parameter]
+        The list of model parameters (for possible estimation).
     current_time: float
         The current time in the model.
     initial_condition: NDArray
@@ -28,21 +31,29 @@ class Model(ABC):
         The observation process error covariance matrix.
     generator: Generator
         The random number generator.
+    times: NDArray
+        The array of all simulation times.
+    states: NDArray
+        The sequence of all computed states.
     """
 
     def __init__(
         self,
         initial_condition: NDArray,
+        parameters: list[Parameter],
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
         generator: Generator,
     ) -> None:
         self.current_time: float = 0
+        self.parameters: list[Parameter] = parameters
         self.initial_condition: NDArray = initial_condition
         self.current_state: NDArray = np.zeros_like(initial_condition)
         self.system_cov: DynamicMatrix = system_cov
         self.observation_cov: DynamicMatrix = observation_cov
         self.generator: Generator = generator
+        self.times: NDArray = np.zeros(0)
+        self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
 
     @abstractmethod
     def forward(
@@ -122,39 +133,39 @@ class ODEModel(Model, ABC):
     ----------
     time_step: float
         The simulation time step for the integrator.
-    integrate: ODEIntegrator
-        The ODE The array of complete computed states.
-    states: NDArray
-        The sequence of all computed states.
+    _integrator: Integrator
+        The model integrator. Default: rk4
+    model_bias: (float) -> NDArray
+        A function to add bias to the model dynamics. It defaults to zero bias.
     """
 
     def __init__(
         self,
         initial_condition: NDArray,
+        parameters: list[Parameter],
         time_step: float,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
         generator: Generator,
+        model_bias: Callable[[float, NDArray], NDArray] | None = None,
         solver: str = "rk4",
     ) -> None:
-        super().__init__(initial_condition, system_cov, observation_cov, generator)
+        super().__init__(
+            initial_condition, parameters, system_cov, observation_cov, generator
+        )
         self.time_step: float = time_step
-        self.times: NDArray = np.zeros(0)
-        self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
         self._integrator: Integrator = get_solver(solver)
-        self.simulated_times: NDArray | None = None
+
+        if model_bias is None:
+            model_bias = lambda _, __: np.zeros_like(self.initial_condition)
+        self.model_bias: Callable[[float, NDArray], NDArray] = model_bias
 
     def reset_model(self) -> None:
-        """It cleas the array of computes states and adds the new initial condiion.
-
-        Parameters
-        ----------
-        initial_condition: NDArray | None, optional
-            The initial condition to initialize the states array. Default: None
-        """
+        """It clears the array of computed states and adds the new initial condition."""
 
         self.current_time = 0
         self.current_state = np.zeros_like(self.initial_condition)
+        self.times = np.zeros(0)
         self.states = np.zeros((self.initial_condition.shape[0], 0))
 
     def integrate(
@@ -163,7 +174,7 @@ class ODEModel(Model, ABC):
         end_time: float,
         initial_condition: NDArray | None = None,
     ) -> tuple[NDArray, NDArray]:
-        """Cast integrator to function.
+        """Wrapper for model integrator.
 
         Parameters
         ----------
@@ -184,8 +195,10 @@ class ODEModel(Model, ABC):
 
         if initial_condition is None:
             initial_condition = self.initial_condition
+
+        f = lambda time, state: self.f(time, state) + self.model_bias(time, state)
         return self._integrator(
-            self.f, initial_condition, init_time, end_time, self.time_step
+            f, initial_condition, init_time, end_time, self.time_step
         )
 
     def forward(
@@ -246,6 +259,7 @@ class LinearModel(ODEModel):
             generator = default_generator
         super().__init__(
             initial_condition,
+            [],
             time_step,
             system_cov,
             observation_cov,
@@ -258,9 +272,9 @@ class LinearModel(ODEModel):
     def f(self, time: float, state: NDArray) -> NDArray:
         """A linear propagation of the state."""
 
-        return self.M(time) @ state[:, np.newaxis]
+        return (self.M(time) @ state[:, np.newaxis]).squeeze()
 
     def _observe(self, state: NDArray) -> NDArray:
         """Observation model for a linear system."""
 
-        return self.H(self.current_time) @ state[:, np.newaxis]
+        return (self.H(self.current_time) @ state).squeeze()
