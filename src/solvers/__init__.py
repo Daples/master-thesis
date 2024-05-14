@@ -4,6 +4,7 @@ from typing import Callable
 from .discrete import discrete
 from .euler import euler
 from .rk4 import rk4
+from .odeint import odeint
 
 
 class Integrators(Enum):
@@ -12,6 +13,7 @@ class Integrators(Enum):
     EULER = "euler"
     RK4 = "rk4"
     DISCRETE = "discrete"
+    SCIPY = "scipy"
 
 
 def get_solver(solver: str) -> Callable:
@@ -24,4 +26,6 @@ def get_solver(solver: str) -> Callable:
             return rk4
         case Integrators.DISCRETE:
             return discrete
+        case Integrators.SCIPY:
+            return odeint
     raise NotImplementedError("Unknown integrator.")
