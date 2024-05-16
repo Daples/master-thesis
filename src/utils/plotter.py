@@ -28,12 +28,6 @@ def setup_save(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
-        # Clear the figure if needed
-        if kwargs.pop("clear", False):
-            plt.cla()
-            plt.clf()
-            plt.close("all")
-
         # Setup matplotlib
         plt.rc("text", usetex=True)
         plt.rcParams.update({"font.size": Plotter.font_size})
@@ -77,10 +71,10 @@ class Plotter:
     figsize_vertical: tuple[int, int] = (8, 10)
     font_size: int = 18
     bands_alpha: float = 0.2
-    h_label: str = "$h\ (\mathrm{m})$"
-    u_label: str = "$u\ (\mathrm{m})$"
-    x_label: str = "$x\ (\mathrm{km})$"
-    c_label: str = "$c\ (\mathrm{m/s}))$"
+    h_label: str = r"$h\ (\mathrm{m})$"
+    u_label: str = r"$u\ (\mathrm{m})$"
+    x_label: str = r"$x\ (\mathrm{km})$"
+    c_label: str = r"$c\ (\mathrm{m/s}))$"
     t_label: str = "Time"
 
     @classmethod
@@ -162,6 +156,13 @@ class Plotter:
         ax.xaxis.set_major_formatter(
             mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
         )
+
+    @classmethod
+    def __clear__(cls) -> None:
+        """It clears the graphic objects."""
+
+        plt.cla()
+        plt.clf()
 
     @classmethod
     def grid(cls, ax: Axes) -> None:
