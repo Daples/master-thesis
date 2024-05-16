@@ -39,7 +39,7 @@ class Lorenz96(ODEModel):
             solver=solver,
         )
 
-    def f(self, _: float, state: NDArray, parameters: NDArray) -> NDArray:
+    def f(self, _: float, state: NDArray) -> NDArray:
         """The right-hand side of the model."""
 
         x = state
