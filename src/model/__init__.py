@@ -55,6 +55,14 @@ class Model(ABC):
         self.times: NDArray = np.zeros(0)
         self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
 
+    def reset_model(self) -> None:
+        """It clears the array of computed states and adds the new initial condition."""
+
+        self.current_time = 0
+        self.current_state = np.zeros_like(self.initial_condition)
+        self.times = np.zeros(0)
+        self.states = np.zeros((self.initial_condition.shape[0], 0))
+
     @abstractmethod
     def forward(
         self,
@@ -159,14 +167,6 @@ class ODEModel(Model, ABC):
         if model_bias is None:
             model_bias = lambda _, __: np.zeros_like(self.initial_condition)
         self.model_bias: Callable[[float, NDArray], NDArray] = model_bias
-
-    def reset_model(self) -> None:
-        """It clears the array of computed states and adds the new initial condition."""
-
-        self.current_time = 0
-        self.current_state = np.zeros_like(self.initial_condition)
-        self.times = np.zeros(0)
-        self.states = np.zeros((self.initial_condition.shape[0], 0))
 
     def integrate(
         self,
