@@ -294,6 +294,16 @@ class FilteringResults:
         ax = kwargs.pop("ax", None)
 
         innovations = self.innovations[state_idx, :]
+        if window is not None:
+            averaged = uniform_filter1d(innovations, size=window)
+            ax = Plotter.plot(
+                self.assimilation_times,
+                averaged,
+                "r",
+                label=self.get_label(f"Averaged w={window}"),
+                ax=ax,
+                **kwargs,
+            )
         ax = Plotter.plot(
             self.assimilation_times,
             innovations,
@@ -307,16 +317,6 @@ class FilteringResults:
             ax=ax,
             **kwargs,
         )
-        if window is not None:
-            averaged = uniform_filter1d(innovations, size=window)
-            ax = Plotter.plot(
-                self.assimilation_times,
-                averaged,
-                "r",
-                label=self.get_label(f"Averaged w={window}"),
-                ax=ax,
-                **kwargs,
-            )
         return ax
 
     def plot_filtering(
@@ -360,6 +360,7 @@ class FilteringResults:
                 self.true_times,
                 self.true_states[state_idx, :],
                 "b",
+                alpha=0.4,
                 label="Truth",
                 ax=ax,
                 **kwargs,
