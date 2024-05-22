@@ -32,7 +32,6 @@ class Model(ABC):
     def __init__(
         self,
         initial_condition: NDArray,
-        generator: Generator,
     ) -> None:
         self.current_time: float = 0
         self.initial_condition: NDArray = initial_condition
@@ -118,7 +117,7 @@ class StochasticModel(Model, ABC):
         observation_cov: DynamicMatrix,
         generator: Generator,
     ) -> None:
-        super().__init__(initial_condition, generator)
+        super().__init__(initial_condition)
         self.parameters: list[Parameter] = parameters
         self.system_cov: DynamicMatrix = system_cov
         self.observation_cov: DynamicMatrix = observation_cov
