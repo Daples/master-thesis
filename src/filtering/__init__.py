@@ -312,12 +312,16 @@ class Filter(ABC):
         self.correct = True
 
         return FilteringResults(
-            copy.deepcopy(self.model),
-            times,
-            observations,
-            estimated_states,
-            estimated_covs,
-            self.model.times,
+            model=copy.deepcopy(self.model),
+            simulation_times=self.model.times,
+            assimilation_times=times,
+            observations=observations,
+            estimated_states=estimated_states[: self.n_states, :],
+            estimated_covs=estimated_covs[: self.n_states, : self.n_states, :],
+            estimated_params=estimated_states[self.n_states :, :],
+            estimated_params_covs=estimated_covs[self.n_states :, self.n_states :, :],
+            full_estimated_states=estimated_states,
+            full_estimated_covs=estimated_covs,
             run_id=run_id,
         )
 
@@ -510,3 +514,40 @@ class EnsembleFilter(Filter):
         super().update_parameters()
         for i, ensemble_model in enumerate(self.ensembles):
             ensemble_model.uncertain_parameters = self.ensemble_params_analysis[:, i]
+
+    def filter(
+        self,
+        times: NDArray,
+        observations: NDArray,
+        store_ensemble: bool = True,
+        spin_up_time: float | None = None,
+        cut_off_time: float | None = None,
+        run_id: str | None = None,
+    ) -> FilteringResults:
+        """Wrapper for filtering. Adds the ensemble data to the filtering results.
+
+        Parameters
+        ----------
+        times: NDArray
+            The array of assimilation times.
+        observations: NDArray
+            The observations to assimilate. Shape: `(n_output, analysis_times)`
+        TODO: spin_up_time: float | None, optional
+            Spin up time for the forward model before assimilation.
+        cut_off_time: float | None, optional
+            A time to stop the assimilation (emulates forecasting). Default: None
+        run_id: str | None, optional
+            An ID for the filtering run/experiment performed. Default: None
+
+        Returns
+        -------
+        FilteringResults
+            The filtering results object with the added ensemble.
+        """
+
+        results = super().filter(
+            times, observations, spin_up_time, cut_off_time, run_id
+        )
+        if store_ensemble:
+            results.ensembles = self.ensembles
+        return results
