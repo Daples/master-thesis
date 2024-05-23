@@ -389,3 +389,46 @@ class Plotter:
         ax.set_zlabel(zlabel)
         cls.grid(ax)
         return ax
+
+    @classmethod
+    @setup_save
+    def hline(
+        cls,
+        y: float,
+        *args: Any,
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        **kwargs: Any,
+    ) -> Axes:
+        """It plots a horizontal axis line at the specified height.
+
+        Parameters
+        ----------
+        y: utils._typing.DataArray
+            The height of the axline.
+        *args: Any
+            Any additional arguments for the plot.
+        ax: Axes, optional
+            The axis to plot on. Default: None
+        figsize: str | None, optional
+            The figure size. Default: None
+        **kwargs: Any
+            The additional keyword arguments for the plot.
+
+        Returns
+        -------
+        matplotlib.figure.Axes
+            The axes handle.
+        """
+
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        args, kwargs = cls.check_args(args, kwargs)
+
+        ax.axhline(y=y, **kwargs, alpha=0.7, linestyle=":")
+        cls.grid(ax)
+        if "label" in kwargs:
+            cls.legend(ax)
+        return ax
