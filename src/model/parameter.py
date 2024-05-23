@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from numpy.random import Generator
 
 
 @dataclass
@@ -9,6 +10,8 @@ class Parameter:
     ----------
     init_value: float
         The parameter initial value.
+    current_value: float
+        The parameter current value.
     uncertainty: float
         The parameter uncertainty (standard deviation of error).
     name: str
@@ -25,3 +28,15 @@ class Parameter:
 
     def __post_init__(self) -> None:
         self.current_value = self.init_value
+
+    def forward(self, generator: Generator | None = None) -> None:
+        """It propagates the parameter (optionally stochastically).
+
+        Parameters
+        ----------
+        generator: Generator | None, optional
+            The RNG. Default: None
+        """
+
+        if generator is not None:
+            self.current_value += generator.normal(loc=0, scale=self.uncertainty)

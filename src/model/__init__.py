@@ -12,25 +12,17 @@ from utils._typing import DynamicMatrix, Integrator
 
 
 class Model(ABC):
-    """A class to represent an arbitrary numerical forecasting model.
+    """An abstract class to represent a general model.
 
     Attributes
     ----------
-    parameters: list[Parameter]
-        The list of model parameters (for possible estimation).
     current_time: float
         The current time in the model.
+    current_state: NDArray
+        The current state of the system.
     initial_condition: NDArray
         The model's initial condition. Not completely needed, but helps define the
         size of the state.
-    current_state: NDArray
-        The current state of the system.
-    system_cov: DynamicMatrix
-        The system error covariance matrix.
-    observation_cov: DynamicMatrix
-        The observation process error covariance matrix.
-    generator: Generator
-        The random number generator.
     times: NDArray
         The array of all simulation times.
     states: NDArray
@@ -40,18 +32,10 @@ class Model(ABC):
     def __init__(
         self,
         initial_condition: NDArray,
-        parameters: list[Parameter],
-        system_cov: DynamicMatrix,
-        observation_cov: DynamicMatrix,
-        generator: Generator,
     ) -> None:
         self.current_time: float = 0
-        self.parameters: list[Parameter] = parameters
         self.initial_condition: NDArray = initial_condition
         self.current_state: NDArray = np.zeros_like(initial_condition)
-        self.system_cov: DynamicMatrix = system_cov
-        self.observation_cov: DynamicMatrix = observation_cov
-        self.generator: Generator = generator
         self.times: NDArray = np.zeros(0)
         self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
 
@@ -109,6 +93,61 @@ class Model(ABC):
             The observed output.
         """
 
+
+class StochasticModel(Model, ABC):
+    """A class to represent an arbitrary numerical forecasting model.
+
+    Attributes
+    ----------
+    parameters: list[Parameter]
+        The list of model parameters (for possible estimation).
+    system_cov: DynamicMatrix
+        The system error covariance matrix.
+    observation_cov: DynamicMatrix
+        The observation process error covariance matrix.
+    generator: Generator
+        The random number generator.
+    """
+
+    def __init__(
+        self,
+        initial_condition: NDArray,
+        parameters: list[Parameter],
+        system_cov: DynamicMatrix,
+        observation_cov: DynamicMatrix,
+        generator: Generator,
+    ) -> None:
+        super().__init__(initial_condition)
+        self.parameters: list[Parameter] = parameters
+        self.system_cov: DynamicMatrix = system_cov
+        self.observation_cov: DynamicMatrix = observation_cov
+        self.generator: Generator = generator
+
+    @property
+    def uncertain_parameters(self) -> list[Parameter]:
+        """Get the list of parameters to be estimated.
+
+        Returns
+        -------
+        list[Parameter]
+            The list of uncertain parameters to be estimated.
+        """
+
+        return [param for param in self.parameters if param.estimate]
+
+    @uncertain_parameters.setter
+    def uncertain_parameters(self, new_values: NDArray) -> None:
+        """Update the uncertain parameters with the estimated values.
+
+        Parameters
+        ----------
+        new_values: NDArray
+            The array of new values.
+        """
+
+        for i, param in enumerate(self.uncertain_parameters):
+            param.current_value = new_values[i]
+
     def observe(self, state: NDArray, add_noise: bool = False) -> NDArray:
         """It extracts the observed state from the state.
 
@@ -134,7 +173,7 @@ class Model(ABC):
         return observation
 
 
-class ODEModel(Model, ABC):
+class ODEModel(StochasticModel, ABC):
     """A class to represent an explicit ODE model. Mostly to include the solver logic.
 
     Attributes

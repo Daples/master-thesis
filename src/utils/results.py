@@ -1,8 +1,9 @@
-from model import Model
+from model import StochasticModel
 from utils.plotter import Plotter
 
 from dataclasses import dataclass
 from matplotlib.axes import Axes
+from matplotlib.pyplot import axhline
 from numpy.typing import NDArray
 from scipy.ndimage import uniform_filter1d
 from typing import Any
@@ -17,8 +18,10 @@ class FilteringResults:
 
     Attributes
     ----------
-    model: Model
+    model: StochasticModel
         The forward model.
+    simulation_times: NDArray
+        The forward model simulation time (in simulation time steps).
     assimilation_times: NDArray
         The array of times where observations were assimilated.
     observations: NDArray
@@ -27,11 +30,23 @@ class FilteringResults:
         The estimated (filtered) states at the assimilation times.
     estimated_covs: NDArray
         The estimated (filtered) covariances at the assimilation times.
-    simulation_times: NDArray
-        The forward model simulation time (in simulation time steps).
+    estimated_params: NDArray
+        The estimated parameters (if available) at each assimilation time.
+    estimated_params_covs: NDArray
+        The estimated covariance of the parameters at each assimilation time.
+    full_estimated_states: NDArray
+        The augmented estimated states at each assimilation time.
+    full_estimated_covs: NDArray
+        The covariance of the augmented state at each assimilation time.
+    run_id: str
+        The experiment ID. Default: None
 
     Properties
     ----------
+    ensembles: list[StochasticModel]
+        The list of ensemble models if available.
+    estimated_ensemble: NDArray
+        The analysis states for all ensembles at each assimilation time.
     true_times: NDArray
         Time instants of true data.
     true_states: NDArray
@@ -42,18 +57,74 @@ class FilteringResults:
         The array of advancing RMSEs.
     """
 
-    model: Model
+    model: StochasticModel
+    simulation_times: NDArray
     assimilation_times: NDArray
     observations: NDArray
     estimated_states: NDArray
     estimated_covs: NDArray
-    simulation_times: NDArray
+    estimated_params: NDArray
+    estimated_params_covs: NDArray
+    full_estimated_states: NDArray
+    full_estimated_covs: NDArray
     run_id: str | None = None
+
+    _estimated_ensemble: NDArray | None = None
+    _ensembles: list[StochasticModel] | None = None
     _estimated_observations: NDArray | None = None
     _true_times: NDArray | None = None
     _true_states: NDArray | None = None
     _innovations: NDArray | None = None
     _rmses: NDArray | None = None
+
+    @property
+    def estimated_ensemble(self) -> NDArray:
+        """The estimated states for all ensemble members at each assimilation time.
+
+        Returns
+        -------
+        NDArray
+            The estimated ensembles.
+        """
+
+        if self._estimated_ensemble is None:
+            n_states, n_times = self.estimated_states.shape
+            n_ensembles = len(self.ensembles)
+            self._estimated_ensemble = np.zeros((n_states, n_ensembles, n_times))
+            for i, ensemble_model in enumerate(self.ensembles):
+                self._estimated_ensemble[:, i, :] = ensemble_model.states
+        return self._estimated_ensemble
+
+    @property
+    def ensembles(self) -> list[StochasticModel]:
+        """The list of models in the ensemble.
+
+        Returns
+        -------
+        list[StochasticModel]
+            The list of stochastic models.
+
+        Raises
+        ------
+        ValueError
+            When no ensemble has been set.
+        """
+
+        if self._ensembles is None:
+            raise ValueError("No ensemble available.")
+        return self._ensembles
+
+    @ensembles.setter
+    def ensembles(self, models: list[StochasticModel]) -> None:
+        """Store the models in the ensemble.
+
+        Parameters
+        ----------
+        models: list[StochasticModel]
+            The list of stochastic models to store.
+        """
+
+        self._ensembles = models
 
     @property
     def true_times(self) -> NDArray:
@@ -76,7 +147,7 @@ class FilteringResults:
 
     @true_times.setter
     def true_times(self, array: NDArray) -> None:
-        """Set the true times if available.
+        """Set the true times when available.
 
         Parameters
         ----------
@@ -133,7 +204,7 @@ class FilteringResults:
 
     @property
     def estimated_observations(self) -> NDArray:
-        """It calculates the innvoations if required.
+        """It calculates the innovations if required.
 
         Returns
         -------
@@ -224,6 +295,16 @@ class FilteringResults:
         ax = kwargs.pop("ax", None)
 
         innovations = self.innovations[state_idx, :]
+        if window is not None:
+            averaged = uniform_filter1d(innovations, size=window)
+            ax = Plotter.plot(
+                self.assimilation_times,
+                averaged,
+                "r",
+                label=self.get_label(f"Averaged w={window}"),
+                ax=ax,
+                **kwargs,
+            )
         ax = Plotter.plot(
             self.assimilation_times,
             innovations,
@@ -237,16 +318,6 @@ class FilteringResults:
             ax=ax,
             **kwargs,
         )
-        if window is not None:
-            averaged = uniform_filter1d(innovations, size=window)
-            ax = Plotter.plot(
-                self.assimilation_times,
-                averaged,
-                "r",
-                label=self.get_label(f"Averaged w={window}"),
-                ax=ax,
-                **kwargs,
-            )
         return ax
 
     def plot_filtering(
@@ -290,6 +361,7 @@ class FilteringResults:
                 self.true_times,
                 self.true_states[state_idx, :],
                 "b",
+                alpha=0.5,
                 label="Truth",
                 ax=ax,
                 **kwargs,
@@ -304,7 +376,7 @@ class FilteringResults:
         )
         Plotter.plot(
             self.assimilation_times,
-            self.estimated_states[state_idx, :],
+            self.full_estimated_states[state_idx, :],
             "r*",
             label="Estimates",
             ylabel=f"$x_{{{state_idx}}}$",
@@ -313,4 +385,39 @@ class FilteringResults:
             ax=ax,
             **kwargs,
         )
+        return ax
+
+    def plot_params(
+        self,
+        param_indices: list[int],
+        ref_params: list[float] | None = None,
+        path: str | None = None,
+        **kwargs: Any,
+    ) -> Axes:
+        """Plot the estimated parameters and optionally show the reference value.
+
+        Parameters
+        ----------
+        param_indices: list[int]
+            The list of indices of parameters to show on the same plot.
+        """
+
+        ax = kwargs.pop("ax", None)
+        colors = ["r", "k", "b", "g"]
+        n_states = self.estimated_states.shape[0]
+        for i in param_indices:
+            param = self.model.parameters[i]
+            ax = Plotter.plot(
+                self.assimilation_times,
+                self.full_estimated_states[n_states + i, :],
+                f"{colors[i]}-o",
+                markersize=3,
+                drawstyle="steps-post",
+                xlabel=Plotter.t_label,
+                ylabel="",
+                label=param.name,
+                ax=ax,
+            )
+            if ref_params is not None:
+                ax = Plotter.hline(ref_params[i], color=colors[i], path=path, ax=ax)
         return ax
