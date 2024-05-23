@@ -361,7 +361,7 @@ class FilteringResults:
                 self.true_times,
                 self.true_states[state_idx, :],
                 "b",
-                alpha=0.4,
+                alpha=0.5,
                 label="Truth",
                 ax=ax,
                 **kwargs,
