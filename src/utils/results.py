@@ -3,6 +3,7 @@ from utils.plotter import Plotter
 
 from dataclasses import dataclass
 from matplotlib.axes import Axes
+from matplotlib.pyplot import axhline
 from numpy.typing import NDArray
 from scipy.ndimage import uniform_filter1d
 from typing import Any
@@ -384,4 +385,39 @@ class FilteringResults:
             ax=ax,
             **kwargs,
         )
+        return ax
+
+    def plot_params(
+        self,
+        param_indices: list[int],
+        ref_params: list[float] | None = None,
+        path: str | None = None,
+        **kwargs: Any,
+    ) -> Axes:
+        """Plot the estimated parameters and optionally show the reference value.
+
+        Parameters
+        ----------
+        param_indices: list[int]
+            The list of indices of parameters to show on the same plot.
+        """
+
+        ax = kwargs.pop("ax", None)
+        colors = ["r", "k", "b", "g"]
+        n_states = self.estimated_states.shape[0]
+        for i in param_indices:
+            param = self.model.parameters[i]
+            ax = Plotter.plot(
+                self.assimilation_times,
+                self.full_estimated_states[n_states + i, :],
+                f"{colors[i]}-o",
+                markersize=3,
+                drawstyle="steps-post",
+                xlabel=Plotter.t_label,
+                ylabel="",
+                label=param.name,
+                ax=ax,
+            )
+            if ref_params is not None:
+                ax = Plotter.hline(ref_params[i], color=colors[i], path=path, ax=ax)
         return ax
