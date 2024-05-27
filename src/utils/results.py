@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import uniform_filter1d
 from typing import Any
 
-
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -300,17 +300,17 @@ class FilteringResults:
             ax = Plotter.plot(
                 self.assimilation_times,
                 averaged,
-                "r",
+                "b--",
+                zorder=np.inf,
                 label=self.get_label(f"Averaged w={window}"),
                 ax=ax,
                 **kwargs,
             )
-        ax = Plotter.plot(
+        ax = Plotter.stem(
             self.assimilation_times,
             innovations,
-            "k",
-            alpha=0.7,
-            zorder=-1,
+            linefmt="grey",
+            # zorder=-1,
             xlabel="$t$",
             ylabel="",
             label=self.get_label("Innovations"),
@@ -409,7 +409,7 @@ class FilteringResults:
             param = self.model.parameters[i]
             ax = Plotter.plot(
                 self.assimilation_times,
-                self.full_estimated_states[n_states + i, :],
+                self.estimated_states[n_states + i, :],
                 f"{colors[i]}-o",
                 markersize=3,
                 drawstyle="steps-post",
@@ -421,3 +421,16 @@ class FilteringResults:
             if ref_params is not None:
                 ax = Plotter.hline(ref_params[i], color=colors[i], path=path, ax=ax)
         return ax
+
+    def plot_av_innovation(self, path: str | None = None, **kwargs: Any) -> Axes:
+        """"""
+
+        averages = []
+        for i in range(self.model.n_states):
+            averages.append(self.innovations[i, :].mean())
+        return Plotter.hist(
+            averages,
+            bins=int(self.model.n_states / 2),
+            xlabel="Average innovations per state",
+            ylabel="Frequency",
+        )
