@@ -21,7 +21,7 @@ class KF(Filter):
         t = self.current_time
         Q = self.model.system_cov(t)
 
-        self.forecast_cov = M(t) @ self.analysis_state @ M(t).T + Q
+        self.full_forecast_cov = M(t) @ self.analysis_state @ M(t).T + Q
 
     def compute_gain(self) -> NDArray:
         """Kalman gain."""
@@ -47,5 +47,5 @@ class KF(Filter):
 
         # Linear discrete Kalman filter equations
         K = self.compute_gain()
-        self.analysis_state = x + K @ (observation - self.model.observe(x))
-        self.analysis_cov = (I - K @ H) @ P
+        self.full_analysis_state = x + K @ (observation - self.model.observe(x))
+        self.full_analysis_cov = (I - K @ H) @ P
