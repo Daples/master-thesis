@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import uniform_filter1d
 from typing import Any
 
-
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -224,12 +224,22 @@ class FilteringResults:
         ax = kwargs.pop("ax", None)
 
         innovations = self.innovations[state_idx, :]
-        ax = Plotter.plot(
+        if window is not None:
+            averaged = uniform_filter1d(innovations, size=window)
+            ax = Plotter.plot(
+                self.assimilation_times,
+                averaged,
+                "b--",
+                zorder=np.inf,
+                label=self.get_label(f"Averaged w={window}"),
+                ax=ax,
+                **kwargs,
+            )
+        ax = Plotter.stem(
             self.assimilation_times,
             innovations,
-            "k",
-            alpha=0.7,
-            zorder=-1,
+            linefmt="grey",
+            # zorder=-1,
             xlabel="$t$",
             ylabel="",
             label=self.get_label("Innovations"),
@@ -314,3 +324,51 @@ class FilteringResults:
             **kwargs,
         )
         return ax
+
+    def plot_params(
+        self,
+        param_indices: list[int],
+        ref_params: list[float] | None = None,
+        path: str | None = None,
+        **kwargs: Any,
+    ) -> Axes:
+        """Plot the estimated parameters and optionally show the reference value.
+
+        Parameters
+        ----------
+        param_indices: list[int]
+            The list of indices of parameters to show on the same plot.
+        """
+
+        ax = kwargs.pop("ax", None)
+        colors = ["r", "k", "b", "g"]
+        n_states = self.estimated_states.shape[0]
+        for i in param_indices:
+            param = self.model.parameters[i]
+            ax = Plotter.plot(
+                self.assimilation_times,
+                self.estimated_states[n_states + i, :],
+                f"{colors[i]}-o",
+                markersize=3,
+                drawstyle="steps-post",
+                xlabel=Plotter.t_label,
+                ylabel="",
+                label=param.name,
+                ax=ax,
+            )
+            if ref_params is not None:
+                ax = Plotter.hline(ref_params[i], color=colors[i], path=path, ax=ax)
+        return ax
+
+    def plot_av_innovation(self, path: str | None = None, **kwargs: Any) -> Axes:
+        """"""
+
+        averages = []
+        for i in range(self.model.n_states):
+            averages.append(self.innovations[i, :].mean())
+        return Plotter.hist(
+            averages,
+            bins=int(self.model.n_states / 2),
+            xlabel="Average innovations per state",
+            ylabel="Frequency",
+        )

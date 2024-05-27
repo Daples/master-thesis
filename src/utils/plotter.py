@@ -9,6 +9,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 from numpy.typing import ArrayLike
+from numpy import mean
 
 
 def setup_save(func: Callable[P, T]) -> Callable[P, T]:
@@ -275,6 +276,59 @@ class Plotter:
 
     @classmethod
     @setup_save
+    def stem(
+        cls,
+        x: ArrayLike,
+        y: ArrayLike,
+        xlabel: str = "$x$",
+        ylabel: str = "$y$",
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Axes:
+        """It creates a plot with standard formatting.
+
+        Parameters
+        ----------
+        x: utils._typing.DataArray
+            The data on horizontal axis.
+        y: utils._typing.DataArray
+            The data on vertical axis.
+        xlabel: str, optional
+            The label of the horizontal axis. Default: "$x$"
+        ylabel: str, optional
+            The label of the vertical axis. Default: "$y$"
+        ax: Axes, optional
+            The axis to plot on. Default: None
+        figsize: str | None, optional
+            The figure size. Default: None
+        *args: Any
+            Any additional arguments for the plot.
+        **kwargs: Any
+            The additional keyword arguments for the plot.
+
+        Returns
+        -------
+        matplotlib.figure.Axes
+            The axes handle.
+        """
+
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        args, kwargs = cls.check_args(args, kwargs)
+        ax.stem(x, y, *args, bottom=mean(y), **kwargs)  # type: ignore
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        cls.grid(ax)
+        if "label" in kwargs:
+            cls.legend(ax)
+        return ax
+
+    @classmethod
+    @setup_save
     def mplot(
         cls,
         x,
@@ -357,8 +411,6 @@ class Plotter:
             The data on second axis.
         z: ArrayLike
             The data on the third axis.
-        *args: Any
-            Any additional arguments for the plot.
         xlabel: str, optional
             The label of the horizontal axis. Default: "$x$"
         ylabel: str, optional
@@ -369,6 +421,8 @@ class Plotter:
             The axis to plot on. Default: None
         figsize: str | None, optional
             The figure size. Default: None
+        *args: Any
+            Any additional arguments for the plot.
         **kwargs: Any
             The additional keyword arguments for the plot.
 
@@ -388,4 +442,100 @@ class Plotter:
         ax.set_ylabel(ylabel)
         ax.set_zlabel(zlabel)
         cls.grid(ax)
+        return ax
+
+    @classmethod
+    @setup_save
+    def hline(
+        cls,
+        y: float,
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Axes:
+        """It plots a horizontal axis line at the specified height.
+
+        Parameters
+        ----------
+        y: utils._typing.DataArray
+            The height of the axline.
+        ax: Axes, optional
+            The axis to plot on. Default: None
+        figsize: str | None, optional
+            The figure size. Default: None
+        *args: Any
+            Any additional arguments for the plot.
+        **kwargs: Any
+            The additional keyword arguments for the plot.
+
+        Returns
+        -------
+        matplotlib.figure.Axes
+            The axes handle.
+        """
+
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        args, kwargs = cls.check_args(args, kwargs)
+
+        ax.axhline(y=y, **kwargs, alpha=0.7, linestyle=":")
+        cls.grid(ax)
+        if "label" in kwargs:
+            cls.legend(ax)
+        return ax
+
+    @classmethod
+    @setup_save
+    def hist(
+        cls,
+        data: ArrayLike,
+        bins: int | None,
+        normalize: bool = False,
+        xlabel: str = "$x$",
+        ylabel: str = "$y$",
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Axes:
+        """It plots a histogram with standard formatting.
+
+        Parameters
+        ----------
+        TODO:
+        data: numpy.ndarray | list
+            The data to create the histogram of.
+        bins: int | None, optional
+            The number of bins to use. Default: None
+        path: str | None, optional
+            The path to save the figure. Default: None
+        xlabel: str | None, optional
+            The label for the horizontal axis. Default: None
+        ylabel: str | None, optional
+            The label for the vertical axis. Default: None
+        normalize: bool, optional
+            If the histogram should be normalized (density). Default: False
+        """
+
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+
+        args, kwargs = cls.check_args(args, kwargs)
+        kwargs = {"color": "skyblue", "ec": "white", "lw": 0.3}
+        if bins is not None:
+            kwargs |= {"bins": bins}
+        ax.hist(data, density=normalize, **kwargs)
+
+        if xlabel is not None:
+            ax.set_xlabel(xlabel)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel)
+        cls.grid(ax)
+        if "label" in kwargs:
+            cls.legend(ax)
         return ax

@@ -54,6 +54,7 @@ class Model(ABC):
         self.generator: Generator = generator
         self.times: NDArray = np.zeros(0)
         self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
+        self.n_states: int = len(self.initial_condition)
 
     def reset_model(self) -> None:
         """It clears the array of computed states and adds the new initial condition."""

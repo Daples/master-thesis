@@ -25,6 +25,29 @@ class Filter(ABC):
         The covariance matrix of the initial state.
     model: Model
         The forward model.
+    generator: Generator
+        The random number generator.
+    correct: bool
+        If assimilation should be performed. This set the gain to 0 for the analysis.
+    n_states: int
+        The number of states.
+    n_outputs: int
+        The number of outputs.
+    full_init_state: NDArray
+        The augmented initial state.
+    full_init_cov: NDArray
+        The covariance of the augmented state.
+    full_analysis_state: NDArray
+        The augmented analysis state.
+    full_analysis_cov: NDArray
+        The covariance of the augmented analysis state.
+    full_forecast_state: NDArray
+        The augmented forecast state.
+    full_forecast_cov: NDArray
+        The covariance of the augmented forecast state.
+
+    Properties
+    ----------
     analysis_state: NDArray
         The analysis state vector, after assimilation.
     analysis_cov: NDArray
