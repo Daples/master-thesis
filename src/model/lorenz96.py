@@ -2,12 +2,12 @@ import numpy as np
 from numpy.typing import NDArray
 from numpy.random import Generator
 
-from model import ODEModel
+from model import ExplicitModel
 from model.parameter import Parameter
-from utils._typing import DynamicMatrix
+from utils._typing import DynamicMatrix, State, Input
 
 
-class Lorenz96(ODEModel):
+class Lorenz96(ExplicitModel):
     """A class to represent the Lorenz-96 model.
 
     Attributes
@@ -22,6 +22,7 @@ class Lorenz96(ODEModel):
         time_step: float,
         n_states: int,
         forcing: Parameter,
+        H: DynamicMatrix,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
         generator: Generator,
@@ -33,13 +34,14 @@ class Lorenz96(ODEModel):
             initial_condition,
             [forcing],
             time_step,
+            H,
             system_cov,
             observation_cov,
             generator,
             solver=solver,
         )
 
-    def f(self, _: float, state: NDArray) -> NDArray:
+    def f(self, _: float, state: State, __: Input) -> NDArray:
         """The right-hand side of the model."""
 
         x = state
@@ -50,7 +52,7 @@ class Lorenz96(ODEModel):
             vec[i] = (x[(i + 1) % n_states] - x[i - 2]) * x[i - 1] - x[i] + forcing
         return vec
 
-    def _observe(self, state: NDArray) -> NDArray:
+    def _observe(self, state: State) -> NDArray:
         """All states are observable."""
 
         return state
