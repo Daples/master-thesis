@@ -1,5 +1,6 @@
 from numpy.typing import NDArray
 from numpy.random import Generator
+from typing import Any
 
 from filtering import EnsembleFilter
 from utils import kalman_gain
@@ -25,13 +26,12 @@ class EnKF(EnsembleFilter):
         init_state: NDArray,
         init_cov: NDArray,
         ensemble_size: int,
-        H: DynamicMatrix,
         generator: Generator | None = None,
+        **_: Any,
     ) -> None:
         super().__init__(
             model, init_state, init_cov, ensemble_size, generator=generator
         )
-        self.H: DynamicMatrix = H
 
     def observation_matrix(self, time: float) -> NDArray:
         """A wrapper for the augmented observation model.
@@ -48,7 +48,7 @@ class EnKF(EnsembleFilter):
         """
 
         obs_matrix = np.zeros((self.n_outputs, self.n_aug))
-        obs_matrix[:, : self.n_states] = self.H(time)
+        obs_matrix[:, : self.n_states] = self.model.H(time)
         return obs_matrix
 
     def compute_gain(self) -> NDArray:
