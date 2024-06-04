@@ -324,6 +324,7 @@ class FilteringResults:
         self,
         state_idx: int,
         path: str | None = None,
+        only_state: bool = False,
         **kwargs: Any,
     ) -> Axes:
         """It shows the result from the filtering.
@@ -356,7 +357,11 @@ class FilteringResults:
             ax=ax,
             **kwargs,
         )
-        if self.true_times is not None and self.true_states is not None:
+        if (
+            self.true_times is not None
+            and self.true_states is not None
+            and not only_state
+        ):
             ax = Plotter.plot(
                 self.true_times,
                 self.true_states[state_idx, :],
@@ -366,14 +371,15 @@ class FilteringResults:
                 ax=ax,
                 **kwargs,
             )
-        Plotter.plot(
-            self.assimilation_times,
-            self.observations[state_idx, :],
-            "kx",
-            label="Observations",
-            ax=ax,
-            **kwargs,
-        )
+        if not only_state:
+            Plotter.plot(
+                self.assimilation_times,
+                self.observations[state_idx, :],
+                "kx",
+                label="Observations",
+                ax=ax,
+                **kwargs,
+            )
         Plotter.plot(
             self.assimilation_times,
             self.full_estimated_states[state_idx, :],
@@ -409,7 +415,7 @@ class FilteringResults:
             param = self.model.parameters[i]
             ax = Plotter.plot(
                 self.assimilation_times,
-                self.estimated_states[n_states + i, :],
+                self.full_estimated_states[n_states + i, :],
                 f"{colors[i]}-o",
                 markersize=3,
                 drawstyle="steps-post",
