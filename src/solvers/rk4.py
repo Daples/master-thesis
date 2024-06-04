@@ -2,13 +2,14 @@ from typing import Callable
 
 import numpy as np
 from numpy.typing import NDArray
+from utils._typing import State, Time, SystemDynamics
 
 
 def rk4(
-    f: Callable[[float, NDArray], NDArray],
-    init_state: NDArray,
-    init_time: float,
-    end_time: float,
+    f: SystemDynamics,
+    init_state: State,
+    init_time: Time,
+    end_time: Time,
     time_step: float,
 ) -> tuple[NDArray, NDArray]:
     """It integrates an ODE between the given `init_time` and `end_time` using
@@ -16,13 +17,13 @@ def rk4(
 
     Parameters
     ----------
-    f: (float, NDArray) -> NDArray
+    f: SystemDynamics
         The right-hand side of the system of ODEs.
-    init_state: NDArray
+    init_state: State
         The initial value of the state.
-    init_time: float
+    init_time: Time
         The time of the initial state.
-    end_time: float
+    end_time: Time
         The time to integrate the ODE to.
     time_step: float
         The time step for integration.
