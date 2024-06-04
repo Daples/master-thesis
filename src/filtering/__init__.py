@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Self
 
 import copy
 import numpy as np
@@ -76,6 +76,7 @@ class Filter(ABC):
         init_state: NDArray,
         init_cov: NDArray,
         generator: Generator | None = None,
+        **_: Any,
     ) -> None:
         self.current_time: float = 0
         self.init_state: NDArray = init_state
@@ -227,6 +228,24 @@ class Filter(ABC):
         """Update the reference model parameters with the latest estimation."""
 
         self.model.uncertain_parameters = self.param_analysis
+
+    def clone(self, **kwargs: Any) -> Self:
+        """Returns a new instance of the filter object with a different model.
+
+        Parameters
+        ----------
+        **kwargs
+            The modified arguments for the new filter.
+
+        Returns
+        -------
+        Filter
+            The newly initialized filter.
+        """
+
+        attrs = self.__dict__
+        attrs |= kwargs
+        return type(self)(**attrs)
 
     def forecast(self, end_time: float, *params: Any) -> None:
         """Forecast step of the filter for the state. Runs the forward model from the
@@ -382,6 +401,7 @@ class EnsembleFilter(Filter):
         init_cov: NDArray,
         ensemble_size: int,
         generator: Generator | None,
+        **_: Any,
     ) -> None:
         super().__init__(model, init_state, init_cov, generator=generator)
 
