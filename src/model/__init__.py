@@ -1,16 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Type
 
 import numpy as np
 from numpy.typing import NDArray
 from numpy.random import Generator
 
 from model.parameter import Parameter
-from solvers import get_solver
+from solver import Solver
+from solver.factory import get_solver
 from utils import default_generator
 from utils._typing import (
+    SystemDynamics,
     DynamicMatrix,
-    Integrator,
     State,
     Input,
     InputFunction,
@@ -26,6 +27,8 @@ class Model(ABC):
 
     Attributes
     ----------
+    name: str
+        An identifier for the current model.
     current_time: Time
         The current time in the model.
     current_state: State
@@ -41,24 +44,23 @@ class Model(ABC):
         The number of states in the model.
     """
 
-    def __init__(
-        self,
-        initial_condition: State,
-    ) -> None:
+    def __init__(self, initial_condition: State) -> None:
+        self.name: str = self.__class__.__name__
         self.current_time: Time = 0
         self.initial_condition: State = initial_condition
-        self.current_state: State = np.zeros_like(initial_condition)
+        self.current_state: State = initial_condition
         self.times: NDArray = np.zeros(0)
         self.states: NDArray = np.zeros((self.initial_condition.shape[0], 0))
         self.n_states: int = len(self.initial_condition)
 
-    def reset_model(self) -> None:
+    def reset_model(self, state: NDArray) -> None:
         """It clears the computed states and sets the initial state to zero."""
 
         self.current_time = 0
-        self.current_state = np.zeros_like(self.initial_condition)
+        self.current_state = state
+        self.initial_condition = state
         self.times = np.zeros(0)
-        self.states = np.zeros((self.initial_condition.shape[0], 0))
+        self.states = np.zeros((state.shape[0], 0))
 
     @abstractmethod
     def forward(
@@ -112,15 +114,24 @@ class StochasticModel(Model, ABC):
     parameters: list[Parameter]
         The list of model parameters (for possible estimation).
     system_cov: DynamicMatrix
-        The system error covariance matrix.
+        The system error covariance matrix. Zero if no noise is required.
     observation_cov: DynamicMatrix
         The observation process error covariance matrix.
     H: DynamicMatrix
         The linear observation model (assumption for applying Kalman analysis).
     generator: Generator
         The random number generator.
+    stochastic_propagation: bool
+        If the model should keep its stochastic component.
     observation_offset: InputFunction | None
         Offset function for the observation operator.
+
+    Properties
+    ----------
+    noise_mask: NDArray
+        Mask for stochastic propagation.
+    uncertain_parameters: list[Parameter]
+        The list of parameters to be estimated.
     """
 
     def __init__(
@@ -131,6 +142,7 @@ class StochasticModel(Model, ABC):
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
         generator: Generator,
+        stochastic_propagation: bool = True,
         observation_offset: InputFunction | None = None,
     ) -> None:
         super().__init__(initial_condition)
@@ -139,9 +151,25 @@ class StochasticModel(Model, ABC):
         self.observation_cov: DynamicMatrix = observation_cov
         self.H: DynamicMatrix = H
         self.generator: Generator = generator
+        self.stochastic_propagation: bool = stochastic_propagation
         if observation_offset is None:
-            observation_offset = lambda _, __: np.zeros(self.system_cov(0).shape[0])
+            observation_offset = lambda _, state: np.zeros_like(state)
         self.observation_offset: InputFunction = observation_offset
+        self._noise_mask: NDArray | None = None
+
+    @property
+    def noise_mask(self) -> NDArray:
+        """Construct the noise mask.
+
+        Returns
+        -------
+        NDArray
+            The noise mask.
+        """
+
+        if self._noise_mask is None:
+            self._noise_mask = np.ones((self.n_states, 1)) * self.stochastic_propagation
+        return self._noise_mask
 
     @property
     def uncertain_parameters(self) -> list[Parameter]:
@@ -168,13 +196,15 @@ class StochasticModel(Model, ABC):
         for i, param in enumerate(self.uncertain_parameters):
             param.current_value = new_values[i]
 
-    def system_error(self, time: Time) -> State:
+    def system_error(self, time: Time, n_samples: int = 1) -> State:
         """Return a realization of the system error.
 
         Parameters
         ----------
         time: Time
             The time to evaluate the realization.
+        n_samples: int | None
+            The number of samples to draw.
 
         Returns
         -------
@@ -183,9 +213,8 @@ class StochasticModel(Model, ABC):
         """
 
         return self.generator.multivariate_normal(
-            np.zeros(self.system_cov(0).shape[0]),
-            self.system_cov(time),
-        )
+            np.zeros_like(self.initial_condition), self.system_cov(time), n_samples
+        ).T
 
     def observation_error(self, time: Time) -> Observation:
         """Return a realization of the observation error.
@@ -248,6 +277,8 @@ class ExplicitModel(StochasticModel, ABC):
         A function to add an input to the model dynamics. It defaults to zero.
     offset: InputFunction
         A function to add an offset to the model dynamics. It defaults to zero.
+    discrete_forcing: InputFunction
+        A forcing to be applied at each discrete time step (solver dt). It defaults to
     """
 
     def __init__(
@@ -259,15 +290,25 @@ class ExplicitModel(StochasticModel, ABC):
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
         generator: Generator,
+        stochastic_propagation: bool = True,
+        observation_offset: InputFunction | None = None,
         input: InputFunction | None = None,
         offset: InputFunction | None = None,
+        discrete_forcing: InputFunction | None = None,
         solver: str = "rk4",
     ) -> None:
         super().__init__(
-            initial_condition, parameters, H, system_cov, observation_cov, generator
+            initial_condition,
+            parameters,
+            H,
+            system_cov,
+            observation_cov,
+            generator,
+            stochastic_propagation=stochastic_propagation,
+            observation_offset=observation_offset,
         )
         self.time_step: float = time_step
-        self._integrator: Integrator = get_solver(solver)
+        self.solver: Type[Solver] = get_solver(solver)
 
         if input is None:
             input = lambda _, __: np.zeros_like(self.initial_condition)
@@ -276,6 +317,21 @@ class ExplicitModel(StochasticModel, ABC):
         if offset is None:
             offset = lambda _, __: np.zeros_like(self.initial_condition)
         self.offset: InputFunction = offset
+
+        if discrete_forcing is None:
+            discrete_forcing = lambda _, __: np.zeros_like(self.initial_condition)
+        self.discrete_forcing: InputFunction = discrete_forcing
+
+    def get_modified_dynamics(self) -> SystemDynamics:
+        """Add the input and offset to the system dynamics.
+
+        Returns
+        -------
+        SystemDynamics
+            The explicit equations with added input and offset.
+        """
+
+        return lambda t, x: self.f(t, x, self.input(t, x)) + self.offset(t, x)
 
     def integrate(
         self,
@@ -305,9 +361,14 @@ class ExplicitModel(StochasticModel, ABC):
         if initial_condition is None:
             initial_condition = self.initial_condition
 
-        f = lambda t, x: self.f(t, x, self.input(t, x)) + self.offset(t, x)
-        return self._integrator(
-            f, initial_condition, init_time, end_time, self.time_step
+        f = self.get_modified_dynamics()
+        return self.solver.solve(
+            f,
+            initial_condition,
+            init_time,
+            end_time,
+            self.time_step,
+            self.discrete_forcing,
         )
 
     def forward(self, state: State, start_time: Time, end_time: Time, *_: Any) -> State:
@@ -362,6 +423,7 @@ class LinearModel(ExplicitModel):
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
         generator: Generator | None,
+        stochastic_propagation: bool = True,
         solver: str = "rk4",
     ) -> None:
         if generator is None:
@@ -374,6 +436,7 @@ class LinearModel(ExplicitModel):
             system_cov,
             observation_cov,
             generator,
+            stochastic_propagation=stochastic_propagation,
             solver=solver,
         )
         self.M: DynamicMatrix = M
