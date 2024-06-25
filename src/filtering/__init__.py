@@ -25,6 +25,8 @@ class Filter(ABC):
         The covariance matrix of the initial state.
     model: Model
         The forward model.
+    current_member: StochasticModel
+        The current ensemble member.
     generator: Generator
         The random number generator.
     correct: bool
@@ -82,6 +84,7 @@ class Filter(ABC):
         self.init_state: NDArray = init_state
         self.init_cov: NDArray = init_cov
         self.model: StochasticModel = model
+        self.current_model: StochasticModel = self.model
 
         if generator is None:
             generator = default_generator
@@ -277,6 +280,7 @@ class Filter(ABC):
         spin_up_time: float | None = None,
         cut_off_time: float | None = None,
         run_id: str | None = None,
+        show_progress: bool = False,
     ) -> FilteringResults:
         """Apply the filter to a set of observations.
 
@@ -292,6 +296,8 @@ class Filter(ABC):
             A time to stop the assimilation (emulates forecasting). Default: None
         run_id: str | None, optional
             An ID for the filtering run/experiment performed. Default: None
+        show_progress: bool, optional
+            Show progress bar for assimilation times. Default: False
 
         Returns
         -------
@@ -300,7 +306,7 @@ class Filter(ABC):
         """
 
         # Reset previously computed model states (TODO: maybe fix?)
-        self.model.reset_model()
+        self.model.reset_model(self.init_state)
 
         if cut_off_time is None:
             cut_off_time = times[-1]
@@ -315,11 +321,14 @@ class Filter(ABC):
         # TODO: Run spin-up time
 
         # Run assimilation
-        for k, t in enumerate(tqdm(times)):
+        array = times
+        if show_progress:
+            array = tqdm(times)
+        for k, t in enumerate(array):
             if t > cut_off_time:
                 self.correct = False
 
-            self.forecast(times[k])
+            self.forecast(t)
             self.analysis(observations[:, k])
 
             # Update model parameters
@@ -373,7 +382,7 @@ class EnsembleFilter(Filter):
     ----------
     ensemble_size: int
         The number of ensemble members.
-    ensembles: list[Model]
+    ensembles: list[StochasticModel]
         The list of independent copies of the reference model.
     full_ensembles_forecast: NDArray
         The forecast of the augmented state.
@@ -419,8 +428,10 @@ class EnsembleFilter(Filter):
     def __init_ensembles__(self) -> None:
         """Initialize each ensemble as an independent model instance."""
 
-        for _ in range(self.ensemble_size):
-            self.ensembles.append(copy.deepcopy(self.model))
+        for i in range(self.ensemble_size):
+            model = copy.deepcopy(self.model)
+            model.name = f"{model.name}_{i}"
+            self.ensembles.append(model)
 
     @property
     def forecast_ensembles(self) -> bool:
@@ -488,21 +499,26 @@ class EnsembleFilter(Filter):
         """
 
         # Propagate reference model (proxi to estimated state)
+        self.current_model = self.model
         self.model.forward(self.analysis_state, self.current_time, end_time, *params)
 
-        # Propagate each ensemble
-        noises = self.generator.multivariate_normal(
-            np.zeros_like(self.init_state),
-            self.model.system_cov(end_time),
-            self.ensemble_size,
+        # Generate masked noises
+        noises = np.multiply(
+            self.model.noise_mask,
+            self.model.system_error(end_time, n_samples=self.ensemble_size),
         )
+
+        # Propagate each ensemble
         for i, ensemble_model in enumerate(self.ensembles):
+            self.current_model = ensemble_model
             new_state = self.model.current_state
             if self.forecast_ensembles:
                 new_state = ensemble_model.forward(
                     self.ensemble_analysis[:, i], self.current_time, end_time, *params
                 )
-                new_state += noises[i, :]
+
+                # Add masked noise
+                new_state += noises[:, i]
 
             self.full_ensemble_forecast[: self.n_states, i] = new_state
             self.full_ensemble_forecast[self.n_states :, i] = (
