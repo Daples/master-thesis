@@ -69,6 +69,7 @@ class Plotter:
     standard: str = "standard"
     figsize_standard: tuple[int, int] = (8, 5)
     figsize_horizontal: tuple[int, int] = (16, 5)
+    figsize_notebook: tuple[int, int] = (10, 3)
     figsize_vertical: tuple[int, int] = (8, 10)
     font_size: int = 18
     bands_alpha: float = 0.2
@@ -331,59 +332,55 @@ class Plotter:
     @setup_save
     def mplot(
         cls,
-        x,
-        ys,
+        x: ArrayLike,
+        ys: list[ArrayLike],
         labels: list[str] | None = None,
-        path: str | None = None,
         xlabel: str = "$x$",
         ylabel: str = "$y$",
-        clear: bool = True,
-        is_ax_date: bool = False,
-        linewidth: float = 1,
-    ) -> tuple[Figure, Axes]:
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Axes:
         """It plots several lines with standard formatting.
 
         Parameters
         ----------
-        x
+        TODO: finish docstring
+        x: ArrayLike
             The data on horizontal axis.
-        ys
-            The data sets on vertical axis. Shape: (data, samples)
+        ys: list[ArrayLike]
+            The list of data arrays to plot.
         labels: list[str] | None
             The labels for each data sample (legend). Default: None
-        path: str | None, optional
-            The name to save the figure with. Default: None
         xlabel: str, optional
             The label of the horizontal axis. Default: "$x$"
         ylabel: str, optional
             The label of the vertical axis. Default: "$y$"
-        clear: bool
-            Whether to clear the figure or not. Default: True
-        is_ax_date: bool
-            Whether the horizontal axis should be date formatted. Default: False
-        linewidth: float
-            The line width for the plots. Default: 1
+        *args: Any
+            Any additional arguments for the plot.
+        **kwargs: Any
+            The additional keyword arguments for the plot.
 
         Returns
         -------
-        matplotlib.figure.Figure
-            The figure handle.
         matplotlib.figure.Axes
             The axes handle.
         """
 
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=cls.figsize_standard)
-        kwargs = {"linewidth": linewidth}
-        if labels is not None:
-            kwargs = {"label": labels}
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        args, kwargs = cls.check_args(args, kwargs)
 
-        for i in range(ys.shape[1]):
-            ax.plot(x, ys[:, i], **kwargs)
+        for i, y in enumerate(ys):
+            ax.plot(x, y, label=labels[i] if labels is not None else None, **kwargs)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        if is_ax_date:
-            cls.date_axis(ax)
         cls.grid(ax)
+        if labels is not None:
+            cls.legend(ax)
         return ax
 
     @classmethod
