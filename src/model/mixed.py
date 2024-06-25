@@ -14,10 +14,18 @@ class MixedDynamicModel(ExplicitModel):
     ----------
     models: list[ExplicitModel]
         The models to join.
+    slices: list[slice]
+        The slices of each model in the augmented state.
     """
 
     def __init__(self, models: list[ExplicitModel]) -> None:
         self.models: list[ExplicitModel] = models
+        self.slices: list[slice] = []
+
+        count = 0
+        for model in self.models:
+            self.slices.append(slice(count, count + model.n_states))
+            count += model.n_states
 
         # Initialize augmented model
         initial_condition = np.hstack(
@@ -44,7 +52,21 @@ class MixedDynamicModel(ExplicitModel):
             generator,
         )
 
-    def forward(
+    @property
+    def noise_mask(self) -> NDArray:
+        """Construct the noise mask based on each models'.
+
+        Returns
+        -------
+        NDArray
+            The vstack of noise masks.
+        """
+
+        if self._noise_mask is None:
+            self._noise_mask = np.vstack([model.noise_mask for model in self.models])
+        return self._noise_mask
+
+    def old_forward(
         self, state: State, start_time: Time, end_time: float, *_: Any
     ) -> NDArray:
         """Run the forward of each model independently."""
@@ -69,3 +91,52 @@ class MixedDynamicModel(ExplicitModel):
 
     def f(self, *_: Any) -> NDArray:
         return np.zeros_like(self.initial_condition)
+
+    def forward(
+        self, state: State, start_time: Time, end_time: float, *_: Any
+    ) -> NDArray:
+        """Solve all models sequentially (run all models for each time step)."""
+
+        num_steps = int((end_time - start_time) / self.time_step) + 1
+        time_vector = np.linspace(start_time, end_time, num=num_steps)
+        states = np.zeros((self.n_states, num_steps))
+
+        # Add initial conditions
+        states[:, 0] = state
+        for model_slice, model in zip(self.slices, self.models):
+            current_state = state[model_slice]
+            model.states = np.hstack(
+                (model.states, current_state.reshape((model.n_states, 1)))
+            )
+            model.current_state = current_state
+
+        for i, t in enumerate(time_vector[:-1]):
+            count = 0
+            for model in self.models:
+                model_slice = slice(count, count + model.n_states)
+                f = model.get_modified_dynamics()
+                new_state = model.solver.step(
+                    f,
+                    t,
+                    model.current_state,
+                    model.time_step,
+                    model.discrete_forcing,
+                )
+                states[model_slice, i + 1] = new_state
+                count += model.n_states
+
+                # Update states for each model
+                model.states = np.hstack(
+                    (model.states, new_state.reshape((model.n_states, 1)))
+                )
+                model.times = np.hstack((model.times, t))
+                model.current_time = time_vector[i + 1]
+                model.current_state = model.states[:, -1]
+
+        # Update states for mixed model
+        self.states = np.hstack((self.states, states))
+        self.times = np.hstack((self.times, time_vector))
+        self.current_time = end_time
+        self.current_state = self.states[:, -1]
+
+        return self.current_state
