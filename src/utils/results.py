@@ -68,12 +68,12 @@ class FilteringResults:
     full_estimated_states: NDArray
     full_estimated_covs: NDArray
     run_id: str | None = None
+    true_times: NDArray | None = None
+    true_states: NDArray | None = None
 
     _estimated_ensemble: NDArray | None = None
     _ensembles: list[StochasticModel] | None = None
     _estimated_observations: NDArray | None = None
-    _true_times: NDArray | None = None
-    _true_states: NDArray | None = None
     _innovations: NDArray | None = None
     _rmses: NDArray | None = None
 
@@ -125,68 +125,6 @@ class FilteringResults:
         """
 
         self._ensembles = models
-
-    @property
-    def true_times(self) -> NDArray:
-        """It stores the true times if available.
-
-        Returns
-        -------
-        NDArray
-            The matrix of true times through time.
-
-        Raises
-        ------
-        ValueError
-            When no ground truth is available.
-        """
-
-        if self._true_times is None:
-            raise ValueError("No true times available.")
-        return self._true_times
-
-    @true_times.setter
-    def true_times(self, array: NDArray) -> None:
-        """Set the true times when available.
-
-        Parameters
-        ----------
-        array: NDArray
-            The array of true times.
-        """
-
-        self._true_times = array
-
-    @property
-    def true_states(self) -> NDArray:
-        """It stores the true states if available.
-
-        Returns
-        -------
-        NDArray
-            The matrix of true states through time.
-
-        Raises
-        ------
-        ValueError
-            When no ground truth is available.
-        """
-
-        if self._true_states is None:
-            raise ValueError("No true states available.")
-        return self._true_states
-
-    @true_states.setter
-    def true_states(self, array: NDArray) -> None:
-        """Set the true states if available.
-
-        Parameters
-        ----------
-        array: NDArray
-            The array of true states.
-        """
-
-        self._true_states = array
 
     @property
     def innovations(self) -> NDArray:
@@ -345,15 +283,15 @@ class FilteringResults:
             The axis handle.
         """
 
-        kwargs |= {"figsize": "horizontal"}
+        kwargs |= {"figsize": "notebook"}
         ax = kwargs.pop("ax", None)
 
         ax = Plotter.plot(
             self.simulation_times,
             self.model.states[state_idx, :],
-            "k",
+            "r",
             label="Assimilation",
-            alpha=0.2,
+            alpha=1,
             ax=ax,
             **kwargs,
         )
@@ -365,8 +303,8 @@ class FilteringResults:
             ax = Plotter.plot(
                 self.true_times,
                 self.true_states[state_idx, :],
-                "b",
-                alpha=0.5,
+                "k",
+                alpha=0.4,
                 label="Truth",
                 ax=ax,
                 **kwargs,
@@ -375,21 +313,41 @@ class FilteringResults:
             Plotter.plot(
                 self.assimilation_times,
                 self.observations[state_idx, :],
-                "kx",
+                "ko",
+                markersize=2,
+                alpha=0.8,
                 label="Observations",
+                ylabel=f"$x_{{{state_idx}}}$",
+                xlabel="$t$",
+                path=path,
                 ax=ax,
+                zorder=-1,
                 **kwargs,
             )
-        Plotter.plot(
-            self.assimilation_times,
-            self.full_estimated_states[state_idx, :],
-            "r*",
-            label="Estimates",
-            ylabel=f"$x_{{{state_idx}}}$",
-            xlabel="$t$",
-            path=path,
-            ax=ax,
-            **kwargs,
+        # Plotter.plot(
+        #     self.assimilation_times,
+        #     self.full_estimated_states[state_idx, :],
+        #     "r*",
+        #     label="Estimates",
+        #     ylabel=f"$x_{{{state_idx}}}$",
+        #     xlabel="$t$",
+        #     ax=ax,
+        #     **kwargs,
+        # )
+
+        # Plot analysis covariance
+        times = self.simulation_times
+        covs = np.zeros_like(times)
+        ensembles_states = np.array([m.states[state_idx] for m in self.ensembles])
+        estimations = self.model.states[state_idx]
+        covs = ensembles_states.std(ddof=1, axis=0)
+        plt.fill_between(
+            times,
+            estimations - covs,
+            estimations + covs,
+            alpha=0.2,
+            color="r",
+            zorder=-1,
         )
         return ax
 
