@@ -55,12 +55,11 @@ class EnKF(EnsembleFilter):
         """Kalman gain."""
 
         t = self.current_time
+        K = np.zeros((self.n_aug, self.n_outputs))
         if self.correct:
             K = kalman_gain(
                 self.full_forecast_cov,
                 self.observation_matrix(t),
                 self.model.observation_cov(t),
             )
-        else:
-            K = np.zeros((self.n_aug, self.n_outputs))
         return K

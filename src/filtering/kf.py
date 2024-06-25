@@ -27,12 +27,11 @@ class KF(Filter):
         """Kalman gain."""
 
         t = self.current_time
+        K = np.zeros((self.n_states, self.n_outputs))
         if self.correct:
             K = kalman_gain(
                 self.forecast_cov, self.model.H(t), self.model.observation_cov(t)
             )
-        else:
-            K = np.zeros((self.n_states, self.n_outputs))
         return K
 
     def analysis(self, observation: NDArray) -> None:
