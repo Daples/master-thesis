@@ -84,15 +84,18 @@ class ColKF:
         kwargs["init_cov"] = block_diag([self.init_cov, self.init_bias_cov])
         self.filter_obj = self.filter_obj.clone(**kwargs)
 
+    def forcing(self, time):
+        val = self.filter_obj.current_model.current_state[self.bias_slice]
+        # print(time, val, self.filter_obj.current_model.name)
+        return val
+
     def _add_feedback(self) -> None:
         """Add AR process to the RHS of the ODE."""
 
         if self.feedback:
-            self.model.offset = lambda *_: -self.ar_model.current_state
+            self.model.discrete_forcing = lambda time, state: -self.forcing(time)
         else:
-            self.model.observation_offset = lambda *_: -self.model._observe(
-                self.ar_model.current_state
-            )
+            self.model.observation_offset = lambda *_: -self.ar_model.current_state
 
     @property
     def state_slice(self) -> slice:
@@ -100,7 +103,7 @@ class ColKF:
 
     @property
     def bias_slice(self) -> slice:
-        return slice(self.n_states, -self.n_params)
+        return slice(int(self.n_states / 2), self.n_states)
 
     @property
     def params_slice(self) -> slice:
