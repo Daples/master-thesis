@@ -1,4 +1,3 @@
-import numpy as np
 from numpy.typing import NDArray
 from utils._typing import State, Time, SystemDynamics, InputFunction
 from solver import Solver
