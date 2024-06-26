@@ -126,17 +126,19 @@ class MixedDynamicModel(ExplicitModel):
                 count += model.n_states
 
                 # Update states for each model
-                model.states = np.hstack(
-                    (model.states, new_state.reshape((model.n_states, 1)))
-                )
-                model.times = np.hstack((model.times, t))
+                # TODO: this is nasty
+                if not i == len(time_vector) - 2:
+                    model.states = np.hstack(
+                        (model.states, new_state.reshape((model.n_states, 1)))
+                    )
+                    model.times = np.hstack((model.times, t))
                 model.current_time = time_vector[i + 1]
-                model.current_state = model.states[:, -1]
+                model.current_state = new_state
 
         # Update states for mixed model
-        self.states = np.hstack((self.states, states))
-        self.times = np.hstack((self.times, time_vector))
+        self.states = np.hstack((self.states, states[:, :-1]))
+        self.times = np.hstack((self.times, time_vector[:-1]))
         self.current_time = end_time
-        self.current_state = self.states[:, -1]
+        self.current_state = states[:, -1]
 
         return self.current_state

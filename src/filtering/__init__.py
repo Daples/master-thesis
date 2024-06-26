@@ -338,7 +338,6 @@ class Filter(ABC):
             estimated_covs[:, :, k] = self.full_analysis_cov
 
         self.correct = True
-
         return FilteringResults(
             model=copy.deepcopy(self.model),
             simulation_times=self.model.times,

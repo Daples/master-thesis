@@ -376,10 +376,10 @@ class ExplicitModel(StochasticModel, ABC):
 
         times, states = self.integrate(start_time, end_time, initial_condition=state)
 
-        self.states = np.hstack((self.states, states))
-        self.times = np.hstack((self.times, times))
+        self.states = np.hstack((self.states, states[:, :-1]))
+        self.times = np.hstack((self.times, times[:-1]))
         self.current_time = end_time
-        self.current_state = self.states[:, -1]
+        self.current_state = states[:, -1]
 
         return self.current_state
 
