@@ -430,6 +430,9 @@ class EnsembleFilter(Filter):
         for i in range(self.ensemble_size):
             model = copy.deepcopy(self.model)
             model.name = f"{model.name}_{i}"
+            model.initial_condition = self.full_ensemble_analysis[:, i]
+            model.current_state = model.initial_condition
+            model.update_generator(self.model.generator)
             self.ensembles.append(model)
 
     @property
