@@ -26,8 +26,8 @@ class ARModel(ExplicitModel):
         system_cov: DynamicMatrix,
         generator: Generator,
         stochastic_propagation: bool = False,
+        stochastic_integration: bool = False,
         input: InputFunction | None = None,
-        add_noise: bool = False,
     ) -> None:
         parameters = []
         observation_cov = lambda _: 0 * np.eye(H(0).shape[0])
@@ -40,15 +40,13 @@ class ARModel(ExplicitModel):
             observation_cov,
             generator,
             stochastic_propagation=stochastic_propagation,
+            stochastic_integration=stochastic_integration,
             solver="discrete",
             input=input,
         )
         self.A: DynamicMatrix = A
-        self.add_noise: bool = add_noise
 
     def f(self, time: float, state: State, input: Input) -> NDArray:
         """AR model with affine input."""
 
-        if self.add_noise:
-            input += self.system_error(time).squeeze()
         return (self.A(time) @ state[:, np.newaxis]).squeeze() + input
