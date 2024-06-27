@@ -196,6 +196,17 @@ class StochasticModel(Model, ABC):
         for i, param in enumerate(self.uncertain_parameters):
             param.current_value = new_values[i]
 
+    def update_generator(self, generator: Generator) -> None:
+        """Update the model RNG.
+
+        Parameters
+        ----------
+        generator: Generator
+            The RNG instance.
+        """
+
+        self.generator = generator
+
     def system_error(self, time: Time, n_samples: int = 1) -> State:
         """Return a realization of the system error.
 
@@ -271,14 +282,16 @@ class ExplicitModel(StochasticModel, ABC):
     ----------
     time_step: float
         The simulation time step for the integrator.
-    _integrator: Integrator
-        The model integrator. Default: rk4
+    solver: Solver
+        The model solver. Default: "rk4"
+    stochastic_integration: bool
+        If the system noise should be added at every integration step. Default: False
     input: InputFunction
         A function to add an input to the model dynamics. It defaults to zero.
     offset: InputFunction
         A function to add an offset to the model dynamics. It defaults to zero.
     discrete_forcing: InputFunction
-        A forcing to be applied at each discrete time step (solver dt). It defaults to
+        A forcing to be applied at each discrete time step (solver dt). It defaults to zero.
     """
 
     def __init__(
@@ -291,6 +304,7 @@ class ExplicitModel(StochasticModel, ABC):
         observation_cov: DynamicMatrix,
         generator: Generator,
         stochastic_propagation: bool = True,
+        stochastic_integration: bool = False,
         observation_offset: InputFunction | None = None,
         input: InputFunction | None = None,
         offset: InputFunction | None = None,
@@ -309,6 +323,11 @@ class ExplicitModel(StochasticModel, ABC):
         )
         self.time_step: float = time_step
         self.solver: Type[Solver] = get_solver(solver)
+        self.stochastic_integration: bool = stochastic_integration
+
+        # Deactivate stochastic ensemble propagation
+        if stochastic_integration:
+            self.stochastic_propagation = False
 
         if input is None:
             input = lambda _, __: np.zeros_like(self.initial_condition)
@@ -332,6 +351,27 @@ class ExplicitModel(StochasticModel, ABC):
         """
 
         return lambda t, x: self.f(t, x, self.input(t, x)) + self.offset(t, x)
+
+    def integration_forcing(self, time: Time, state: State) -> Input:
+        """Optionally add noise as forcing if `stochastic_integration` flag is True.
+
+        Parameters
+        ----------
+        time: Time
+            The time to evaluate the forcing at.
+        state: State
+            The input state.
+
+        Returns
+        -------
+        Input
+            The discrete forcing with optionally added noise.
+        """
+
+        val = self.discrete_forcing(time, state)
+        if self.stochastic_integration:
+            val += self.system_error(time, n_samples=1).squeeze()
+        return val
 
     def integrate(
         self,
@@ -368,7 +408,7 @@ class ExplicitModel(StochasticModel, ABC):
             init_time,
             end_time,
             self.time_step,
-            self.discrete_forcing,
+            self.integration_forcing,
         )
 
     def forward(self, state: State, start_time: Time, end_time: Time, *_: Any) -> State:
@@ -424,6 +464,7 @@ class LinearModel(ExplicitModel):
         observation_cov: DynamicMatrix,
         generator: Generator | None,
         stochastic_propagation: bool = True,
+        stochastic_integration: bool = False,
         solver: str = "rk4",
     ) -> None:
         if generator is None:
@@ -437,6 +478,7 @@ class LinearModel(ExplicitModel):
             observation_cov,
             generator,
             stochastic_propagation=stochastic_propagation,
+            stochastic_integration=stochastic_integration,
             solver=solver,
         )
         self.M: DynamicMatrix = M
