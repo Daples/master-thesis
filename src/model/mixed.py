@@ -1,4 +1,5 @@
 from numpy.typing import NDArray
+from numpy.random import Generator
 from model import ExplicitModel
 from typing import Any
 from utils import block_diag
@@ -66,28 +67,12 @@ class MixedDynamicModel(ExplicitModel):
             self._noise_mask = np.vstack([model.noise_mask for model in self.models])
         return self._noise_mask
 
-    def old_forward(
-        self, state: State, start_time: Time, end_time: float, *_: Any
-    ) -> NDArray:
-        """Run the forward of each model independently."""
+    def update_generator(self, generator: Generator) -> None:
+        """Update the generator for all models."""
 
-        count = 0
+        super().update_generator(generator)
         for model in self.models:
-            model.forward(state[count : count + model.n_states], start_time, end_time)
-            count += model.n_states
-
-        # Assuming both models run on the same timestep
-        self.times = self.models[0].times
-        try:
-            self.states = np.vstack([model.states for model in self.models])
-        except ValueError:
-            raise ValueError(
-                "The states have different time lengths. Try resetting both models."
-            )
-
-        self.current_time = end_time
-        self.current_state = self.states[:, -1]
-        return self.current_state
+            model.update_generator(generator)
 
     def f(self, *_: Any) -> NDArray:
         return np.zeros_like(self.initial_condition)
@@ -120,7 +105,7 @@ class MixedDynamicModel(ExplicitModel):
                     t,
                     model.current_state,
                     model.time_step,
-                    model.discrete_forcing,
+                    model.integration_forcing,
                 )
                 states[model_slice, i + 1] = new_state
                 count += model.n_states
