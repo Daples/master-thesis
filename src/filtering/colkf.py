@@ -93,9 +93,9 @@ class ColKF:
         """Add AR process to the RHS of the ODE."""
 
         if self.feedback:
-            self.model.discrete_forcing = lambda time, state: -self.forcing(time)
+            self.model.discrete_forcing = lambda time, _: -self.forcing(time)
         else:
-            self.model.observation_offset = lambda *_: -self.ar_model.current_state
+            self.model.observation_offset = lambda time, _: -self.forcing(time)
 
     @property
     def state_slice(self) -> slice:
