@@ -18,6 +18,8 @@ class Parameter:
         The parameter name/ID. Default: ""
     estimate: bool
         If the parameter should be estimated through DA. Default: False
+    add_noise: bool
+        If noise should be added at the forecast step.
     """
 
     init_value: float
@@ -25,6 +27,8 @@ class Parameter:
     current_value: float = 0
     name: str = ""
     estimate: bool = False
+    stochastic_propagation: bool = False
+    stochastic_integration: bool = False
 
     def __post_init__(self) -> None:
         self.current_value = self.init_value

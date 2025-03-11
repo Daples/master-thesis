@@ -147,6 +147,7 @@ class StochasticModel(Model, ABC):
     ) -> None:
         super().__init__(initial_condition)
         self.parameters: list[Parameter] = parameters
+        self.n_aug: int = self.n_states + len(self.uncertain_parameters)
         self.system_cov: DynamicMatrix = system_cov
         self.observation_cov: DynamicMatrix = observation_cov
         self.H: DynamicMatrix = H
@@ -367,6 +368,11 @@ class ExplicitModel(StochasticModel, ABC):
         Input
             The discrete forcing with optionally added noise.
         """
+
+        # Update parameters if needed
+        for param in self.uncertain_parameters:
+            if param.stochastic_integration:
+                param.forward(generator=self.generator)
 
         val = self.discrete_forcing(time, state)
         if self.stochastic_integration:
