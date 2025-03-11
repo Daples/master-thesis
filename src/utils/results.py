@@ -1,9 +1,9 @@
 from model import StochasticModel
 from utils.plotter import Plotter
+from utils import state_str, bias_str
 
 from dataclasses import dataclass
 from matplotlib.axes import Axes
-from matplotlib.pyplot import axhline
 from numpy.typing import NDArray
 from scipy.ndimage import uniform_filter1d
 from typing import Any
@@ -67,15 +67,42 @@ class FilteringResults:
     estimated_params_covs: NDArray
     full_estimated_states: NDArray
     full_estimated_covs: NDArray
+    is_bias_aware: bool
+    cut_off_time: float | None
+    cut_off_index: int | None
     run_id: str | None = None
     true_times: NDArray | None = None
     true_states: NDArray | None = None
+    full_ensemble_states: NDArray | None = None
 
+    _var_names: list[str] | None = None
     _estimated_ensemble: NDArray | None = None
     _ensembles: list[StochasticModel] | None = None
     _estimated_observations: NDArray | None = None
     _innovations: NDArray | None = None
     _rmses: NDArray | None = None
+
+    figsize: str = "standard"
+
+    @property
+    def var_names(self) -> list[str]:
+        """Add variable names."""
+
+        if self._var_names is None:
+            nx = self.model.n_states
+            np = len(self.model.uncertain_parameters)
+
+            self._var_names = [""] * (nx + np)
+            self._var_names[:nx] = [f"${{{state_str}}}_{{{i}}}$" for i in range(nx)]
+            self._var_names[nx:] = [
+                param.name for param in self.model.uncertain_parameters
+            ]
+
+            if self.is_bias_aware:
+                nb = int(nx / 2)
+                for i in range(nb):
+                    self._var_names[nb + i] = f"${{{bias_str}}}_{{{i}}}$"
+        return self._var_names
 
     @property
     def estimated_ensemble(self) -> NDArray:
@@ -88,7 +115,7 @@ class FilteringResults:
         """
 
         if self._estimated_ensemble is None:
-            n_states, n_times = self.estimated_states.shape
+            n_states, n_times = self.model.states.shape
             n_ensembles = len(self.ensembles)
             self._estimated_ensemble = np.zeros((n_states, n_ensembles, n_times))
             for i, ensemble_model in enumerate(self.ensembles):
@@ -151,7 +178,11 @@ class FilteringResults:
         """
 
         if self._estimated_observations is None:
-            self._estimated_observations = self.model.observe(self.estimated_states)
+            self._estimated_observations = np.zeros_like(self.observations)
+            for i, _ in enumerate(self.assimilation_times):
+                self._estimated_observations[:, i] = self.model.observe(
+                    self.estimated_states[:, i]
+                )
         return self._estimated_observations
 
     @property
@@ -206,6 +237,9 @@ class FilteringResults:
     def plot_innovations(
         self,
         state_idx: int,
+        alpha: float = 1,
+        shift: float = 0.0,
+        color: str | None = None,
         window: int | None = None,
         path: str | None = None,
         **kwargs: Any,
@@ -229,40 +263,54 @@ class FilteringResults:
             The axis handle.
         """
 
-        kwargs |= {"figsize": "horizontal"}
+        kwargs |= {"figsize": "standard"}
+        # kwargs |= {"figsize": self.figsize}
         ax = kwargs.pop("ax", None)
+        if color is None:
+            color = Plotter.color
 
+        if self.cut_off_time is not None:
+            ax = Plotter.vline(
+                self.cut_off_time, ax=ax, color=Plotter.cut_color, **kwargs
+            )
+        ax = Plotter.hline(0, color="k", ax=ax)
         innovations = self.innovations[state_idx, :]
         if window is not None:
             averaged = uniform_filter1d(innovations, size=window)
             ax = Plotter.plot(
                 self.assimilation_times,
                 averaged,
-                "b--",
+                "--",
+                color=color,
+                alpha=alpha / 3,
                 zorder=np.inf,
                 label=self.get_label(f"Averaged w={window}"),
                 ax=ax,
                 **kwargs,
             )
         ax = Plotter.stem(
-            self.assimilation_times,
+            self.assimilation_times + shift,
             innovations,
-            linefmt="grey",
-            # zorder=-1,
-            xlabel="$t$",
+            cut_index=self.cut_off_index,
+            color=color,
+            alpha=alpha,
+            xlabel=Plotter.t_label,
             ylabel="",
             label=self.get_label("Innovations"),
             path=path,
             ax=ax,
-            **kwargs,
         )
         return ax
 
     def plot_filtering(
         self,
         state_idx: int,
+        plot_ensemble: bool,
+        plot_bands: bool,
         path: str | None = None,
         only_state: bool = False,
+        color: str | None = None,
+        legend: bool = True,
         **kwargs: Any,
     ) -> Axes:
         """It shows the result from the filtering.
@@ -283,72 +331,79 @@ class FilteringResults:
             The axis handle.
         """
 
-        kwargs |= {"figsize": "notebook"}
+        if color is None:
+            color = Plotter.color
         ax = kwargs.pop("ax", None)
+        if ax is None:
+            Plotter.setup()
+            _, ax = Plotter.subplots(1, 1, figsize=self.figsize)
 
-        ax = Plotter.plot(
-            self.simulation_times,
-            self.model.states[state_idx, :],
-            "r",
-            label="Assimilation",
-            alpha=1,
-            ax=ax,
-            **kwargs,
-        )
-        if (
-            self.true_times is not None
-            and self.true_states is not None
-            and not only_state
-        ):
+        if self.cut_off_time is not None:
+            ax = Plotter.vline(self.cut_off_time, ax=ax, color=Plotter.cut_color)
+
+        add_label = lambda s: s if legend else None
+        if plot_ensemble:
+            for ensemble in self.ensembles:
+                ax = Plotter.plot(
+                    ensemble.times,
+                    ensemble.states[state_idx, :],
+                    color,
+                    ax=ax,
+                    alpha=Plotter.ensemble_alpha,
+                    zorder=-1,
+                    linewidth=Plotter.ensemble_width,
+                )
+
+        # Plot ensemble spread
+        if plot_bands:
+            times = self.simulation_times
+            ensembles_states = np.array([m.states[state_idx] for m in self.ensembles])
+            estimations = self.model.states[state_idx]
+            stds = ensembles_states.std(ddof=1, axis=0)
+            ax = Plotter.bands(
+                times,
+                estimations,
+                stds,
+                ax=ax,
+                color=color,
+            )
+        if self.true_times is not None and self.true_states is not None:
             ax = Plotter.plot(
                 self.true_times,
                 self.true_states[state_idx, :],
-                "k",
-                alpha=0.4,
-                label="Truth",
+                "k--",
+                alpha=Plotter.truth_alpha,
+                label=add_label("Truth"),
                 ax=ax,
                 **kwargs,
+                zorder=2,
             )
         if not only_state:
             Plotter.plot(
                 self.assimilation_times,
                 self.observations[state_idx, :],
-                "ko",
-                markersize=2,
-                alpha=0.8,
-                label="Observations",
-                ylabel=f"$x_{{{state_idx}}}$",
-                xlabel="$t$",
-                path=path,
+                "kx",
+                markersize=4,
+                alpha=1,
+                label=add_label("Observations"),
                 ax=ax,
-                zorder=-1,
+                zorder=4,
                 **kwargs,
             )
-        # Plotter.plot(
-        #     self.assimilation_times,
-        #     self.full_estimated_states[state_idx, :],
-        #     "r*",
-        #     label="Estimates",
-        #     ylabel=f"$x_{{{state_idx}}}$",
-        #     xlabel="$t$",
-        #     ax=ax,
-        #     **kwargs,
-        # )
-
-        # Plot analysis covariance
-        times = self.simulation_times
-        covs = np.zeros_like(times)
-        ensembles_states = np.array([m.states[state_idx] for m in self.ensembles])
-        estimations = self.model.states[state_idx]
-        covs = ensembles_states.std(ddof=1, axis=0)
-        plt.fill_between(
-            times,
-            estimations - covs,
-            estimations + covs,
-            alpha=0.2,
-            color="r",
-            zorder=-1,
+        ax = Plotter.plot(
+            self.simulation_times,
+            self.model.states[state_idx, :],
+            color,
+            label=add_label("Assimilation"),
+            ylabel=self.var_names[state_idx],
+            xlabel="$t$",
+            alpha=1,
+            ax=ax,
+            path=path,
+            zorder=3,
+            **kwargs,
         )
+
         return ax
 
     def plot_params(
@@ -366,24 +421,39 @@ class FilteringResults:
             The list of indices of parameters to show on the same plot.
         """
 
+        kwargs |= {"figsize": self.figsize}
         ax = kwargs.pop("ax", None)
-        colors = ["r", "k", "b", "g"]
-        n_states = self.estimated_states.shape[0]
-        for i in param_indices:
+        if self.cut_off_time is not None:
+            ax = Plotter.vline(self.cut_off_time, ax=ax, color=Plotter.cut_color)
+
+        n_states = self.model.n_states
+        for j, i in enumerate(param_indices):
             param = self.model.parameters[i]
+            x = np.hstack((0, self.assimilation_times))
+            y = np.hstack(
+                (param.init_value, self.full_estimated_states[n_states + i, :])
+            )
+
             ax = Plotter.plot(
-                self.assimilation_times,
-                self.full_estimated_states[n_states + i, :],
-                f"{colors[i]}-o",
+                x,
+                y,
+                "-o",
+                color=Plotter.colors[i],
                 markersize=3,
                 drawstyle="steps-post",
                 xlabel=Plotter.t_label,
                 ylabel="",
                 label=param.name,
                 ax=ax,
+                **kwargs,
             )
+            s = np.sqrt(self.estimated_params_covs[i, i, :])
+            s = np.hstack((param.uncertainty, s))
+            ax = Plotter.bands(x, y, s, ax=ax, color=Plotter.colors[i])
             if ref_params is not None:
-                ax = Plotter.hline(ref_params[i], color=colors[i], path=path, ax=ax)
+                ax = Plotter.hline(
+                    ref_params[j], color=Plotter.colors[i], path=path, ax=ax
+                )
         return ax
 
     def plot_av_innovation(self, path: str | None = None, **kwargs: Any) -> Axes:
@@ -397,4 +467,6 @@ class FilteringResults:
             bins=int(self.model.n_states / 2),
             xlabel="Average innovations per state",
             ylabel="Frequency",
+            path=path,
+            **kwargs,
         )
