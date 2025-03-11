@@ -1,37 +1,13 @@
 from numpy.typing import NDArray
-from numpy.random import Generator
-from typing import Any
 
 from filtering import EnsembleFilter
 from utils import kalman_gain
-from utils._typing import DynamicMatrix
-
-from model import StochasticModel
 
 import numpy as np
 
 
 class EnKF(EnsembleFilter):
-    """A class to represent the Ensemble Kalman Filter.
-
-    Attributes
-    ----------
-    H: DynamicMatrix
-        The (linearized) observation model.
-    """
-
-    def __init__(
-        self,
-        model: StochasticModel,
-        init_state: NDArray,
-        init_cov: NDArray,
-        ensemble_size: int,
-        generator: Generator | None = None,
-        **_: Any,
-    ) -> None:
-        super().__init__(
-            model, init_state, init_cov, ensemble_size, generator=generator
-        )
+    """A class to represent the Ensemble Kalman Filter."""
 
     def observation_matrix(self, time: float) -> NDArray:
         """A wrapper for the augmented observation model.

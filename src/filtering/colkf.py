@@ -71,6 +71,7 @@ class ColKF:
     init_bias: NDArray
     init_bias_cov: NDArray
     feedback: bool
+    continuous_bias: bool = False
     augmented_model: MixedDynamicModel | None = None
 
     def __post_init__(self) -> None:
@@ -83,6 +84,7 @@ class ColKF:
         kwargs["init_state"] = np.hstack((self.init_state, self.init_bias))
         kwargs["init_cov"] = block_diag([self.init_cov, self.init_bias_cov])
         self.filter_obj = self.filter_obj.clone(**kwargs)
+        self.filter_obj.n_real_states = int(self.n_states / 2)
 
     def forcing(self, time):
         val = self.filter_obj.current_model.current_state[self.bias_slice]
@@ -93,7 +95,11 @@ class ColKF:
         """Add AR process to the RHS of the ODE."""
 
         if self.feedback:
-            self.model.discrete_forcing = lambda time, _: -self.forcing(time)
+            f = lambda time, _: -self.forcing(time)
+            if self.continuous_bias:
+                self.model.offset = f
+            else:
+                self.model.discrete_forcing = f
         else:
             self.model.observation_offset = lambda time, _: -self.forcing(time)
 
@@ -213,10 +219,12 @@ class ColKF:
     ) -> FilteringResults:
         """Wrapper for the filtering process."""
 
-        return self.filter_obj.filter(
+        results = self.filter_obj.filter(
             times,
             observations,
             spin_up_time=spin_up_time,
             cut_off_time=cut_off_time,
             run_id=run_id,
         )
+        results.is_bias_aware = True
+        return results
