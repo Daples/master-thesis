@@ -8,7 +8,6 @@ from numpy.typing import NDArray
 from scipy.ndimage import uniform_filter1d
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 
