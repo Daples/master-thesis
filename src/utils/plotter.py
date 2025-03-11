@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.axes3d import Axes3D
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from numpy import mean
+from utils import tud_blue, purple, orange, red, dark_blue, pink
 
 
 def setup_save(func: Callable[P, T]) -> Callable[P, T]:
@@ -30,20 +31,15 @@ def setup_save(func: Callable[P, T]) -> Callable[P, T]:
     @functools.wraps(func)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
         # Setup matplotlib
-        plt.rc("text", usetex=True)
-        plt.rcParams.update({"font.size": Plotter.font_size})
+        Plotter.setup()
 
         # Plotting function
         path = cast(str | None, kwargs.pop("path", None))
         response = func(*args, **kwargs)
 
         # Save fig
-        folder = Plotter._folder
-        if path is not None:
-            if not os.path.exists(folder):
-                os.mkdir(folder)
-            path = os.path.join(folder, path)
-            plt.savefig(path, bbox_inches="tight")
+        Plotter.save_fig(path)
+
         return response
 
     return wrapped
@@ -63,21 +59,51 @@ class Plotter:
     TODO: finish list
     """
 
-    _folder: str = os.path.join(os.getcwd(), "figs")
-    args: tuple[Any] = ("k-",)
+    fig_folder: str | None = None
+    _default_folder: str = "figs"
+    folder: Callable[[str], str] = lambda x: os.path.join(os.getcwd(), x)
+    file_extension: str = "svg"
+    file_dpi: int = 200
+
+    colors: tuple[str, ...] = (tud_blue, purple, orange, red, dark_blue)
+    color: str = colors[0]
+    cut_color: str = pink
+    args: tuple[Any] = ("-",)
     kwargs: dict[str, Any] = {"markersize": 3}
+
     standard: str = "standard"
     figsize_standard: tuple[int, int] = (8, 5)
-    figsize_horizontal: tuple[int, int] = (16, 5)
+    figsize_horizontal: tuple[int, int] = (16, 4)
+    figsize_horizontal_inn: tuple[int, float] = (16, 2.5)
     figsize_notebook: tuple[int, int] = (10, 3)
-    figsize_vertical: tuple[int, int] = (8, 10)
-    font_size: int = 18
+    figsize_vertical: tuple[int, int] = (14, 9)
+    figsize_tall: tuple[int, int] = (10, 10)
+
+    font_size: int = 20
     bands_alpha: float = 0.2
-    h_label: str = r"$h\ (\mathrm{m})$"
-    u_label: str = r"$u\ (\mathrm{m})$"
-    x_label: str = r"$x\ (\mathrm{km})$"
-    c_label: str = r"$c\ (\mathrm{m/s}))$"
-    t_label: str = "Time"
+    stem_alpha: float = 0.5
+    t_label: str = "$t$"
+
+    ensemble_alpha: float = 0.2
+    ensemble_width: float = 0.3
+    truth_alpha: float = 0.4
+
+    @classmethod
+    def setup(cls) -> None:
+        plt.rc("text", usetex=True)
+        plt.rcParams.update({"font.size": cls.font_size})
+
+    @classmethod
+    def save_fig(cls, path: str | None, ext: str | None = None) -> None:
+        if ext is None:
+            ext = cls.file_extension
+        x = cls._default_folder if cls.fig_folder is None else cls.fig_folder
+        folder = cls.folder(x)
+        if path is not None:
+            if not os.path.exists(folder):
+                os.mkdir(folder)
+            path = os.path.join(folder, f"{path}.{ext}")
+            plt.savefig(path, bbox_inches="tight", dpi=cls.file_dpi)
 
     @classmethod
     def check_args(
@@ -181,19 +207,34 @@ class Plotter:
     @classmethod
     @overload
     def subplots(
-        cls, nrows: int, ncols: int, figsize: str, make_3d: Literal[True] = ...
+        cls,
+        nrows: int,
+        ncols: int,
+        figsize: str,
+        make_3d: Literal[True] = ...,
+        **kwargs: Any,
     ) -> tuple[Figure, Axes3D]: ...
 
     @classmethod
     @overload
     def subplots(
-        cls, nrows: int, ncols: int, figsize: str, make_3d: Literal[False]
+        cls,
+        nrows: int,
+        ncols: int,
+        figsize: str,
+        make_3d: Literal[False],
+        **kwargs: Any,
     ) -> tuple[Figure, Axes]: ...
 
     @classmethod
     def subplots(
-        cls, nrows: int, ncols: int, figsize: str, make_3d: bool = False
-    ) -> tuple[Figure, Axes | Axes3D]:
+        cls,
+        nrows: int,
+        ncols: int,
+        figsize: str,
+        make_3d: bool = False,
+        **kwargs: Any,
+    ) -> tuple[Figure, Axes | Axes3D | NDArray]:
         """Get matplotlib figure and axes. Mostly for safe typing.
 
         Parameters
@@ -217,7 +258,7 @@ class Plotter:
 
         aux = "figsize"
         size = getattr(cls, aux + "_" + figsize)
-        kwargs = {aux: size}
+        kwargs |= {aux: size}
         if make_3d:
             kwargs |= {"subplot_kw": {"projection": "3d"}}
         return plt.subplots(nrows=nrows, ncols=ncols, **kwargs)
@@ -229,8 +270,8 @@ class Plotter:
         x: ArrayLike,
         y: ArrayLike,
         *args: Any,
-        xlabel: str = "$x$",
-        ylabel: str = "$y$",
+        xlabel: str | None = None,
+        ylabel: str | None = None,
         ax: Axes | None = None,
         figsize: str | None = None,
         **kwargs: Any,
@@ -268,10 +309,14 @@ class Plotter:
             _, ax = cls.subplots(1, 1, figsize)
         args, kwargs = cls.check_args(args, kwargs)
         ax.plot(x, y, *args, **kwargs)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel)
         cls.grid(ax)
-        if "label" in kwargs:
+
+        label = kwargs.pop("label", None)
+        if label is not None:
             cls.legend(ax)
         return ax
 
@@ -281,6 +326,7 @@ class Plotter:
         cls,
         x: ArrayLike,
         y: ArrayLike,
+        cut_index: int | None = None,
         xlabel: str = "$x$",
         ylabel: str = "$y$",
         ax: Axes | None = None,
@@ -319,12 +365,32 @@ class Plotter:
             figsize = cls.standard
         if ax is None:
             _, ax = cls.subplots(1, 1, figsize)
+        if cut_index is None:
+            cut_index = len(y)  # type: ignore
         args, kwargs = cls.check_args(args, kwargs)
-        ax.stem(x, y, *args, bottom=mean(y), **kwargs)  # type: ignore
+        color = kwargs.pop("color", cls.color)
+        alpha = kwargs.pop("alpha", 1)
+
+        # ax.plot(x, y, color=color)
+        markers, stemlines, baseline = ax.stem(
+            x,
+            y,
+            *args,
+            markerfmt=color,
+            linefmt=color,
+            basefmt=color,
+            bottom=mean(y[:cut_index]),  # type: ignore
+            **kwargs,
+        )
+        plt.setp(stemlines, alpha=cls.stem_alpha, linewidth=1)
+        plt.setp(baseline, alpha=alpha)
+        plt.setp(markers, markersize=3)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         cls.grid(ax)
-        if "label" in kwargs:
+
+        label = kwargs.pop("label", None)
+        if label is not None:
             cls.legend(ax)
         return ax
 
@@ -443,6 +509,49 @@ class Plotter:
 
     @classmethod
     @setup_save
+    def vline(
+        cls,
+        x: float,
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Axes:
+        """It plots a vertical axis line at the specified location.
+
+        Parameters
+        ----------
+        x: utils._typing.DataArray
+            The height of the axline.
+        ax: Axes, optional
+            The axis to plot on. Default: None
+        figsize: str | None, optional
+            The figure size. Default: None
+        *args: Any
+            Any additional arguments for the plot.
+        **kwargs: Any
+            The additional keyword arguments for the plot.
+
+        Returns
+        -------
+        matplotlib.figure.Axes
+            The axes handle.
+        """
+
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        args, kwargs = cls.check_args(args, kwargs)
+
+        ax.axvline(x=x, **kwargs, alpha=0.8, linestyle=":")
+        cls.grid(ax)
+        if "label" in kwargs:
+            cls.legend(ax)
+        return ax
+
+    @classmethod
+    @setup_save
     def hline(
         cls,
         y: float,
@@ -478,10 +587,40 @@ class Plotter:
             _, ax = cls.subplots(1, 1, figsize)
         args, kwargs = cls.check_args(args, kwargs)
 
-        ax.axhline(y=y, **kwargs, alpha=0.7, linestyle=":")
+        ax.axhline(y=y, **kwargs, alpha=0.8, linestyle=":")
         cls.grid(ax)
         if "label" in kwargs:
             cls.legend(ax)
+        return ax
+
+    @classmethod
+    @setup_save
+    def bands(
+        cls,
+        x: ArrayLike,
+        y: NDArray,
+        s: NDArray,
+        ax: Axes | None = None,
+        figsize: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Axes:
+        """Plot bands around mean value.
+
+        Parameters
+        ----------
+        x: ArrayLike
+            The horizontal axis.
+        y:
+        """
+        if figsize is None:
+            figsize = cls.standard
+        if ax is None:
+            _, ax = cls.subplots(1, 1, figsize)
+        ax.fill_between(
+            x, y - s, y + s, zorder=-1, alpha=cls.bands_alpha, *args, **kwargs
+        )
+        cls.grid(ax)
         return ax
 
     @classmethod
@@ -522,17 +661,22 @@ class Plotter:
         if ax is None:
             _, ax = cls.subplots(1, 1, figsize)
 
-        args, kwargs = cls.check_args(args, kwargs)
-        kwargs = {"color": "skyblue", "ec": "white", "lw": 0.3}
+        color = kwargs.pop("color", cls.color)
+        label = kwargs.pop("label", None)
+        kwargs |= {
+            "ec": "white",
+            "lw": 0.3,
+            "facecolor": color,
+        }
         if bins is not None:
             kwargs |= {"bins": bins}
-        ax.hist(data, density=normalize, **kwargs)
 
+        ax.hist(data, density=normalize, label=label, **kwargs)
         if xlabel is not None:
             ax.set_xlabel(xlabel)
         if ylabel is not None:
             ax.set_ylabel(ylabel)
-        cls.grid(ax)
-        if "label" in kwargs:
+        # cls.grid(ax)
+        if label is not None:
             cls.legend(ax)
         return ax
