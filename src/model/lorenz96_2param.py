@@ -22,6 +22,7 @@ class Lorenz96(ExplicitModel):
         time_step: float,
         n_states: int,
         forcing: Parameter,
+        bias: Parameter,
         H: DynamicMatrix,
         system_cov: DynamicMatrix,
         observation_cov: DynamicMatrix,
@@ -34,7 +35,7 @@ class Lorenz96(ExplicitModel):
         self.forcing: float = forcing.init_value
         super().__init__(
             initial_condition,
-            [forcing],
+            [forcing, bias],
             time_step,
             H,
             system_cov,
@@ -51,21 +52,12 @@ class Lorenz96(ExplicitModel):
         x = state
         n_states = x.shape[0]
         vec = np.zeros(n_states)
-        forcing = self.parameters[0].current_value
         for i in range(n_states):
+            forcing = (
+                self.parameters[0].current_value + self.parameters[1].current_value
+            )
             vec[i] = (x[(i + 1) % n_states] - x[i - 2]) * x[i - 1] - x[i] + forcing
         return vec
-
-    def f_old(self, _: float, state: State, __: Input) -> NDArray:
-        """The right-hand side of the model."""
-
-        x = state
-        F = self.parameters[0].current_value
-        x1 = np.roll(x, -1)
-        x_1 = np.roll(x, 1)
-        x_2 = np.roll(x, 2)
-
-        return (x1 - x_2) * x_1 - x + F
 
     def _observe(self, state: State) -> NDArray:
         """All states are observable."""
