@@ -2,19 +2,13 @@ import numpy as np
 from numpy.typing import NDArray
 from numpy.random import Generator
 
-from model import ODEModel
+from model import ExplicitModel
 from model.parameter import Parameter
-from utils._typing import DynamicMatrix
+from utils._typing import DynamicMatrix, Input, State, Time
 
 
-class Linear2D(ODEModel):
-    """A class to represent a 2D linear system.
-
-    Attributes
-    ----------
-    H: DynamicMatrix
-        The observation model.
-    """
+class Linear2D(ExplicitModel):
+    """A class to represent a 2D linear system."""
 
     def __init__(
         self,
@@ -31,14 +25,14 @@ class Linear2D(ODEModel):
             initial_condition,
             parameters,
             time_step,
+            H,
             system_cov,
             observation_cov,
             generator,
             solver=solver,
         )
-        self.H: DynamicMatrix = H
 
-    def f(self, _: float, state: NDArray) -> NDArray:
+    def f(self, _: Time, state: State, __: Input) -> NDArray:
         """The right-hand side of the model."""
 
         return (
@@ -53,8 +47,3 @@ class Linear2D(ODEModel):
             )
             @ state
         )
-
-    def _observe(self, state: NDArray) -> NDArray:
-        """All states are observable."""
-
-        return self.H(self.current_time) @ state

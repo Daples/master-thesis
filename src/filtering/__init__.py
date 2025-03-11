@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Self
 
 import copy
 import numpy as np
@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from model import StochasticModel
 from utils.results import FilteringResults
-from utils import default_generator
+from utils import default_generator, get_localization_mask
 
 
 class Filter(ABC):
@@ -25,6 +25,8 @@ class Filter(ABC):
         The covariance matrix of the initial state.
     model: Model
         The forward model.
+    current_member: StochasticModel
+        The current ensemble member.
     generator: Generator
         The random number generator.
     correct: bool
@@ -76,11 +78,13 @@ class Filter(ABC):
         init_state: NDArray,
         init_cov: NDArray,
         generator: Generator | None = None,
+        **_: Any,
     ) -> None:
         self.current_time: float = 0
         self.init_state: NDArray = init_state
         self.init_cov: NDArray = init_cov
         self.model: StochasticModel = model
+        self.current_model: StochasticModel = self.model
 
         if generator is None:
             generator = default_generator
@@ -89,6 +93,7 @@ class Filter(ABC):
         self.n_states: int = len(self.init_state)
         self.n_outputs: int = len(self.model.observe(self.init_state))
         self.n_aug: int = self.n_states + self.n_params
+        self.n_real_states: int = self.n_states
         self.correct: bool = True
 
         self.full_init_state: NDArray = np.zeros(self.n_aug)
@@ -228,6 +233,24 @@ class Filter(ABC):
 
         self.model.uncertain_parameters = self.param_analysis
 
+    def clone(self, **kwargs: Any) -> Self:
+        """Returns a new instance of the filter object with a different model.
+
+        Parameters
+        ----------
+        **kwargs
+            The modified arguments for the new filter.
+
+        Returns
+        -------
+        Filter
+            The newly initialized filter.
+        """
+
+        attrs = self.__dict__
+        attrs |= kwargs
+        return type(self)(**attrs)
+
     def forecast(self, end_time: float, *params: Any) -> None:
         """Forecast step of the filter for the state. Runs the forward model from the
         current model time to `end_time`.
@@ -281,7 +304,7 @@ class Filter(ABC):
         """
 
         # Reset previously computed model states (TODO: maybe fix?)
-        self.model.reset_model()
+        self.model.reset_model(self.init_state)
 
         if cut_off_time is None:
             cut_off_time = times[-1]
@@ -296,21 +319,25 @@ class Filter(ABC):
         # TODO: Run spin-up time
 
         # Run assimilation
+        cut_off_index = None
         for k, t in enumerate(tqdm(times)):
             if t > cut_off_time:
                 self.correct = False
+                if cut_off_index is None:
+                    cut_off_index = k
 
-            self.forecast(times[k])
+            self.forecast(t)
             self.analysis(observations[:, k])
 
-            # Update model parameters
+            # Update model (and ensemble) parameters
             self.update_parameters()
 
             estimated_states[:, k] = self.full_analysis_state
             estimated_covs[:, :, k] = self.full_analysis_cov
 
+        if cut_off_index is None:
+            cut_off_index = len(times)
         self.correct = True
-
         return FilteringResults(
             model=copy.deepcopy(self.model),
             simulation_times=self.model.times,
@@ -322,6 +349,9 @@ class Filter(ABC):
             estimated_params_covs=estimated_covs[self.n_states :, self.n_states :, :],
             full_estimated_states=estimated_states,
             full_estimated_covs=estimated_covs,
+            is_bias_aware=False,
+            cut_off_time=cut_off_time,
+            cut_off_index=cut_off_index,
             run_id=run_id,
         )
 
@@ -354,7 +384,7 @@ class EnsembleFilter(Filter):
     ----------
     ensemble_size: int
         The number of ensemble members.
-    ensembles: list[Model]
+    ensembles: list[StochasticModel]
         The list of independent copies of the reference model.
     full_ensembles_forecast: NDArray
         The forecast of the augmented state.
@@ -365,6 +395,12 @@ class EnsembleFilter(Filter):
     ----------
     forecast_ensemble: bool
         If the ensemble should be propagated (i.e. with noise).
+    localize: bool
+        Whether to apply localization or not.
+    loc_radius: int
+        The radius for localization if needed.
+    loc_matrix: NDArray
+        The mask for localizing the background covariance matrix.
     ensemble_analysis: NDArray
         The analysis state of all ensembles.
     ensemble_params_analysis: NDArray
@@ -381,13 +417,21 @@ class EnsembleFilter(Filter):
         init_state: NDArray,
         init_cov: NDArray,
         ensemble_size: int,
-        generator: Generator | None,
+        generator: Generator | None = None,
+        loc_radius: int | None = None,
+        **_: Any,
     ) -> None:
         super().__init__(model, init_state, init_cov, generator=generator)
 
         self.ensemble_size: int = ensemble_size
         self.ensembles: list[StochasticModel] = []
+        self._loc_radius: int | None = loc_radius
+        self._loc_matrix: NDArray = np.eye(self.init_state.size)
+        self.__compute_loc: bool = True
 
+        self.seq_full_ensemble_analysis: NDArray = np.zeros(
+            (self.model.n_aug, self.ensemble_size, 0)
+        )
         self.full_ensemble_analysis: NDArray = self.generator.multivariate_normal(
             self.full_init_state, self.full_init_cov, self.ensemble_size
         ).T
@@ -399,8 +443,52 @@ class EnsembleFilter(Filter):
     def __init_ensembles__(self) -> None:
         """Initialize each ensemble as an independent model instance."""
 
-        for _ in range(self.ensemble_size):
-            self.ensembles.append(copy.deepcopy(self.model))
+        for i in range(self.ensemble_size):
+            model = copy.deepcopy(self.model)
+            model.name = f"{model.name}_{i}"
+            model.initial_condition = self.ensemble_analysis[:, i]
+            model.current_state = model.initial_condition
+
+            model.uncertain_parameters = self.full_ensemble_analysis[self.n_states :, i]
+            for param in self.model.uncertain_parameters:
+                param.init_value = param.current_value
+
+            model.update_generator(self.model.generator)
+            self.ensembles.append(model)
+
+    @property
+    def loc_radius(self) -> int:
+        """The localization radius."""
+
+        if self._loc_radius is None:
+            raise ValueError("Localization has not been specified.")
+        return self._loc_radius
+
+    @loc_radius.setter
+    def loc_radius(self, val: int) -> None:
+        """Update radius and computation flag."""
+
+        self._loc_radius = val
+        self.__compute_loc = True
+
+    @property
+    def loc_matrix(self) -> NDArray:
+        """Return the localization mask for the background covariance matrix.
+
+        Returns
+        -------
+        NDArray
+            The mask matrix.
+        """
+
+        if self.__compute_loc:
+            dim = self.n_real_states
+            loc_matrix = np.ones((dim, dim))
+            if self._loc_radius is not None:
+                loc_matrix = get_localization_mask(self.loc_radius, dim)
+            self._loc_matrix = loc_matrix
+            self.__compute_loc = False
+        return self._loc_matrix
 
     @property
     def forecast_ensembles(self) -> bool:
@@ -468,29 +556,45 @@ class EnsembleFilter(Filter):
         """
 
         # Propagate reference model (proxi to estimated state)
+        self.current_model = self.model
         self.model.forward(self.analysis_state, self.current_time, end_time, *params)
 
-        # Propagate each ensemble
-        noises = self.generator.multivariate_normal(
-            np.zeros_like(self.init_state),
-            self.model.system_cov(end_time),
-            self.ensemble_size,
+        # Generate masked noises
+        noises = np.multiply(
+            self.model.noise_mask,
+            self.model.system_error(end_time, n_samples=self.ensemble_size),
         )
+
+        # Propagate each ensemble
         for i, ensemble_model in enumerate(self.ensembles):
-            new_state = self.model.current_state
+            self.current_model = ensemble_model
+            new_state = ensemble_model.forward(
+                self.ensemble_analysis[:, i], self.current_time, end_time, *params
+            )
+
+            # Only added if the filter is still correcting
             if self.forecast_ensembles:
-                new_state = ensemble_model.forward(
-                    self.ensemble_analysis[:, i], self.current_time, end_time, *params
-                )
-                new_state += noises[i, :]
+                new_state += noises[:, i]
 
             self.full_ensemble_forecast[: self.n_states, i] = new_state
-            self.full_ensemble_forecast[self.n_states :, i] = (
-                self.full_ensemble_analysis[self.n_states :, i]
-            )
+
+            # Update parameters
+            for j, param in enumerate(ensemble_model.uncertain_parameters):
+                if param.stochastic_propagation:
+                    generator = self.generator
+                    param.forward(generator=generator)
+                self.full_ensemble_forecast[self.n_states + j, i] = param.current_value
 
         self.full_forecast_state = self.full_ensemble_forecast.mean(axis=1)
         self.full_forecast_cov = np.cov(self.full_ensemble_forecast, ddof=1)
+
+        # Apply localization if needed
+        if self._loc_radius is not None:
+            s = slice(None, self.n_real_states)
+            self.full_forecast_cov[s, s] = np.multiply(
+                self.loc_matrix, self.full_forecast_cov[s, s]
+            )
+
         self.current_time = self.model.current_time
 
     def analysis(self, observation: NDArray) -> None:
@@ -505,6 +609,10 @@ class EnsembleFilter(Filter):
                 self.full_ensemble_forecast[:, i] + K @ innovation
             )
 
+        self.seq_full_ensemble_analysis = np.concat(
+            (self.seq_full_ensemble_analysis, self.full_ensemble_analysis[..., None]),
+            axis=-1,
+        )
         self.full_analysis_state = self.full_ensemble_analysis.mean(axis=1)
         self.full_analysis_cov = np.cov(self.full_ensemble_analysis, ddof=1)
 
@@ -550,4 +658,6 @@ class EnsembleFilter(Filter):
         )
         if store_ensemble:
             results.ensembles = self.ensembles
+            results.full_ensemble_states = self.seq_full_ensemble_analysis
+        print(f"Localize: {self._loc_radius is not None}")
         return results
