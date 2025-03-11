@@ -3,7 +3,19 @@ from numpy.random import Generator, default_rng
 from numpy.typing import NDArray
 import numpy as np
 
-default_generator = default_rng(123456789)
+default_generator: Generator = default_rng(123456789)
+
+tud_blue: str = "#00A6D6"
+purple: str = "#6F1D77"
+orange: str = "#EC6842"
+red: str = "#E03C31"
+dark_blue: str = "#0C2340"
+pink: str = "#EF60A3"
+
+state_str: str = "x"
+param_str: str = "\\theta"
+bias_str: str = "b"
+ar_str: str = "r"
 
 
 def get_generator() -> Generator:
@@ -80,3 +92,26 @@ def kalman_gain(P: NDArray, H: NDArray, R: NDArray) -> NDArray:
     """
 
     return (P @ H.T) @ inv(H @ P @ H.T + R)
+
+
+def get_localization_mask(r: int, dim: int) -> NDArray:
+    """Get a localization mask based on Gaussian decay.
+
+    Parameters
+    ----------
+    r: int
+        The influence radius for localization.
+    dim: int
+        The state dimension.
+    """
+
+    tmp = np.zeros((dim, dim))
+    for i in range(1, 3 * r + 1):
+        tmp += np.exp(-(i**2) / r**2) * (
+            np.diag(np.ones(dim - i), i)
+            + np.diag(np.ones(dim - i), -i)
+            + np.diag(np.ones(i), dim - i)
+            + np.diag(np.ones(i), -(dim - i))
+        )
+    mask = tmp + np.diag(np.ones(dim))
+    return mask
